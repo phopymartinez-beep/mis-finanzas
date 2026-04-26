@@ -1,0 +1,25 @@
+export default function StatCard({ title, value, subtitle, icon: Icon, color = 'blue' }) {
+  const colorMap = {
+    blue: 'bg-blue-50 text-blue-600',
+    green: 'bg-green-50 text-green-600',
+    red: 'bg-red-50 text-red-600',
+    purple: 'bg-purple-50 text-purple-600',
+  }
+
+  return (
+    <div className="card">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-500">{title}</p>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+          {subtitle && <p className="text-xs text-gray-400 mt-1">{subtitle}</p>}
+        </div>
+        {Icon && (
+          <div className={`p-2 rounded-lg ${colorMap[color]}`}>
+            <Icon size={20} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
