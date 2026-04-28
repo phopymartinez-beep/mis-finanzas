@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
 // ─── INITIAL DATA ─────────────────────────────────────────────────────────────
@@ -78,6 +78,13 @@ export default function App() {
   const [budget,       setBudget]      = useState(0);
   const [cardSettings, setCardSettings]= useState({closingDay:25,dueDay:1});
   const [loading,      setLoading]     = useState(true);
+  const [isMobile,     setIsMobile]    = useState(window.innerWidth < 768);
+
+  useEffect(()=>{
+    const handleResize=()=>setIsMobile(window.innerWidth<768);
+    window.addEventListener("resize",handleResize);
+    return ()=>window.removeEventListener("resize",handleResize);
+  },[]);
   // Navigation
   const [modal,        setModal]       = useState(null);
   const [accountDetail,setAccountDetail]=useState(null); // accountId being viewed
@@ -410,7 +417,8 @@ export default function App() {
   // ─── STYLES ────────────────────────────────────────────────────────────────
   const C={gold:"#C8A97E",red:"#E85A5A",green:"#5AE89A",blue:"#5A9BE8",pink:"#E87ACE",purple:"#A07CFE",bg:"#0D0D12",text:"#EDE9E3"};
   const S={
-    app:   {minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",maxWidth:430,margin:"0 auto",paddingBottom:80},
+    app:   (mob)=>mob?{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",maxWidth:430,margin:"0 auto",paddingBottom:80}:{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",display:"flex"},
+    content:{flex:1,overflowY:"auto",paddingBottom:20},
     hdr:   {padding:"24px 20px 12px",borderBottom:"1px solid rgba(200,169,126,0.1)"},
     ey:    {fontSize:11,letterSpacing:4,color:C.gold,textTransform:"uppercase",marginBottom:2},
     h1:    {fontSize:22,margin:0,fontWeight:"normal"},
@@ -433,8 +441,10 @@ export default function App() {
     chk:   done=>({width:28,height:28,borderRadius:8,border:`2px solid ${done?C.green:"#333"}`,background:done?"rgba(90,232,154,0.12)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,fontSize:15,color:C.green}),
     tog:   on=>({width:46,height:24,borderRadius:12,background:on?C.gold:"#222",border:"none",cursor:"pointer",position:"relative",flexShrink:0}),
     togDot:on=>({position:"absolute",top:3,left:on?25:3,width:18,height:18,borderRadius:"50%",background:on?C.bg:"#555",transition:"left 0.2s"}),
-    nav:   {position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:C.bg,borderTop:"1px solid rgba(200,169,126,0.1)",display:"flex",justifyContent:"space-around",padding:"10px 0 14px",zIndex:50},
+    nav:   (mob)=>mob?{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:C.bg,borderTop:"1px solid rgba(200,169,126,0.1)",display:"flex",justifyContent:"space-around",padding:"10px 0 14px",zIndex:50}:{display:"none"},
+    sidebar:{width:200,background:"#111118",borderRight:"1px solid rgba(200,169,126,0.15)",display:"flex",flexDirection:"column",padding:"24px 0",flexShrink:0,minHeight:"100vh"},
     nBtn:  a=>({background:"none",border:"none",color:a?C.gold:"#333",fontSize:10,letterSpacing:2,textTransform:"uppercase",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"0 8px"}),
+    sBtn:  a=>({padding:"10px 20px",background:a?"rgba(200,169,126,0.1)":"transparent",borderLeft:a?"2px solid #C8A97E":"2px solid transparent",cursor:"pointer",display:"flex",alignItems:"center",gap:10,border:"none",width:"100%",textAlign:"left",color:a?C.gold:"#666",fontSize:13,fontFamily:"Georgia,serif"}),
     modal: {position:"fixed",inset:0,background:C.bg,zIndex:200,overflowY:"auto",maxWidth:430,margin:"0 auto"},
     fab:   {position:"fixed",bottom:22,right:20,width:52,height:52,borderRadius:"50%",background:C.gold,border:"none",fontSize:26,color:C.bg,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 20px rgba(200,169,126,0.35)",zIndex:99},
     xBtn:  {background:"none",border:"none",color:"#333",cursor:"pointer",fontSize:16,padding:"0 2px",flexShrink:0},
@@ -501,7 +511,28 @@ export default function App() {
     </>
   );
 
-  if(loading) return <div style={{...S.app,display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}><span style={{color:C.gold}}>Cargando…</span></div>;
+  // Sidebar component for desktop
+  const Sidebar = () => (
+    <div style={S.sidebar}>
+      <div style={{padding:"0 20px 20px",borderBottom:"1px solid rgba(200,169,126,0.1)"}}>
+        <div style={{fontSize:9,letterSpacing:3,color:C.gold,textTransform:"uppercase",marginBottom:4}}>Mis finanzas</div>
+        <div style={{fontSize:14,color:C.text}}>{MONTHS_FULL[CM]}</div>
+      </div>
+      <nav style={{padding:"16px 0",flex:1}}>
+        {NAV.map(([t,e,l])=>(
+          <button key={t} style={S.sBtn(tab===t)} onClick={()=>setTab(t)}>
+            <span style={{fontSize:16}}>{e}</span>
+            <span>{l}</span>
+          </button>
+        ))}
+      </nav>
+      <div style={{padding:"16px 20px"}}>
+        <button onClick={()=>setModal("txn")} style={{width:"100%",padding:"12px",borderRadius:10,background:"rgba(200,169,126,0.15)",border:"1px solid rgba(200,169,126,0.3)",color:C.gold,fontSize:13,cursor:"pointer",fontFamily:"Georgia,serif"}}>+ Nuevo movimiento</button>
+      </div>
+    </div>
+  );
+
+  if(loading) return <div style={{...S.app(isMobile),display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}><span style={{color:C.gold}}>Cargando…</span></div>;
 
   // ══════════════════════════════════════════════════════════════════════════
   // MODALES
@@ -675,7 +706,7 @@ export default function App() {
     const bal=accountBalance(accountDetail);
     const isTarjeta=accountDetail==="tarjeta";
     return(
-      <div style={S.app}>
+      <div style={S.app(isMobile)}>
         <div style={{...S.hdr,display:"flex",alignItems:"center",gap:12}}>
           <button onClick={()=>setAccountDetail(null)} style={S.back}>←</button>
           <div style={{flex:1}}>
@@ -716,7 +747,7 @@ export default function App() {
             })}
           </div>
         }
-        <div style={S.nav}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>{setAccountDetail(null);setTab(t);}}><span>{e}</span>{l}</button>)}</div>
+        <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>{setAccountDetail(null);setTab(t);}}><span>{e}</span>{l}</button>)}</div>
       </div>
     );
   }
@@ -735,7 +766,9 @@ export default function App() {
     const rDueDay=cardSettings.dueDay;
     const rDaysLeft=viewCurr?daysUntil(rDueDay,CM,CY):daysUntil(rDueDay,NM,NY);
     return(
-      <div style={S.app}>
+      <div style={S.app(isMobile)}>
+        {!isMobile&&<Sidebar/>}
+        <div style={isMobile?{}:S.content}>
         <div style={S.hdr}><div style={S.ey}>Compromisos</div><h1 style={S.h1}>{MONTHS_FULL[viewM]} {viewY}</h1></div>
         <div style={{display:"flex",gap:10,padding:"12px 14px 0"}}>
           <button onClick={()=>setBillsView("current")} style={{...S.tBtn(viewCurr,C.gold),flex:1}}>Este mes ({MONTHS_ES[CM]})</button>
@@ -819,7 +852,9 @@ export default function App() {
           })}
         </div>
         <button style={S.fab} onClick={()=>setModal("bill")}>+</button>
-        <div style={S.nav}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
+        <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
+        {!isMobile&&<div/>}
+        </div>
       </div>
     );
   }
@@ -828,7 +863,9 @@ export default function App() {
   // ACCOUNTS TAB
   // ══════════════════════════════════════════════════════════════════════════
   if(tab==="accounts") return(
-    <div style={S.app}>
+    <div style={S.app(isMobile)}>
+      {!isMobile&&<Sidebar/>}
+      <div style={isMobile?{}:S.content}>
       <div style={S.hdr}><div style={S.ey}>Mis cuentas</div><h1 style={S.h1}>Balance por cuenta</h1></div>
       {accounts.map(acc=>{
         const bal=accountBalance(acc.id);const neg=bal<0;const isTarjeta=acc.id==="tarjeta";
@@ -880,7 +917,7 @@ export default function App() {
         <div key={i} style={{margin:"6px 14px"}}><button onClick={fn} style={{width:"100%",padding:12,borderRadius:12,background:bg,border:`1px solid ${border}`,color:col,fontSize:13,cursor:"pointer",fontFamily:"Georgia"}}>{label}</button></div>
       ))}
       <button style={S.fab} onClick={()=>setModal("account")}>+</button>
-      <div style={S.nav}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
+      <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
     </div>
   );
 
@@ -888,7 +925,9 @@ export default function App() {
   // INSIGHTS TAB
   // ══════════════════════════════════════════════════════════════════════════
   if(tab==="insights") return(
-    <div style={S.app}>
+    <div style={S.app(isMobile)}>
+      {!isMobile&&<Sidebar/>}
+      <div style={isMobile?{}:S.content}>
       <div style={S.hdr}><div style={S.ey}>Análisis</div><h1 style={S.h1}>¿A dónde va tu plata?</h1></div>
       <div style={S.gCard()}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
@@ -959,7 +998,7 @@ export default function App() {
         </div>
       </div>
       <div style={{height:80}}/>
-      <div style={S.nav}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
+      <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
     </div>
   );
 
@@ -967,7 +1006,9 @@ export default function App() {
   // HOME TAB — solo pendientes y urgentes
   // ══════════════════════════════════════════════════════════════════════════
   return(
-    <div style={S.app}>
+    <div style={S.app(isMobile)}>
+      {!isMobile&&<Sidebar/>}
+      <div style={isMobile?{}:S.content}>
       <div style={{...S.hdr,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div><div style={S.ey}>Mis finanzas · {MONTHS_FULL[CM]}</div><h1 style={S.h1}>Hola 👋</h1></div>
       </div>
@@ -1044,8 +1085,9 @@ export default function App() {
       </div>
       <div style={{height:80}}/>
       <button style={S.fab} onClick={()=>setModal("txn")}>+</button>
-      <div style={S.nav}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
+      <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
     </div>
   );
 }
 
+    
