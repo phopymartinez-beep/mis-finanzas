@@ -203,7 +203,7 @@ export default function App() {
 
   // Urgent
   const urgentRegular = pendingRegularBills.filter(b=>daysUntil(b.dueDay,CM,CY)<=5).sort((a,b2)=>daysUntil(a.dueDay,CM,CY)-daysUntil(b2.dueDay,CM,CY));
-  const resumenIsUrgent = !prevResumenPaid && resumenDaysLeft<=5;
+  const resumenIsUrgent = !prevResumenPaid && resumenDaysLeft<=5 && prevResumenAmount>0;
 
   // ── Balances ───────────────────────────────────────────────────────────────
   const totalIn  = txns.filter(t=>t.type==="ingreso").reduce((s,t)=>s+toARS(t),0);
@@ -990,7 +990,7 @@ export default function App() {
           <div style={{fontSize:24,color:C.pink,fontFamily:"Georgia"}}>{fmt(prevResumenAmount)}</div>
           <div style={{fontSize:11,color:"#7A4060",marginTop:3}}>Vence el {cardSettings.dueDay} de {MONTHS_FULL[CM]} · {resumenDaysLeft<0?`Venció hace ${Math.abs(resumenDaysLeft)}d`:resumenDaysLeft===0?"¡HOY!":resumenDaysLeft===1?"Mañana":`${resumenDaysLeft} días`}</div>
         </div>
-      ):(
+      ):currAccumulating>0?(
         <div style={{...S.card(),background:"rgba(90,232,154,0.05)",border:"1px solid rgba(90,232,154,0.15)"}}>
           <div style={S.row}><span style={{fontSize:20}}>✅</span><div style={{flex:1}}><div style={{fontSize:13,color:C.green}}>Resumen {MONTHS_FULL[PM]} pagado</div><div style={{fontSize:11,color:"#666",marginTop:2}}>Acumulando {MONTHS_FULL[CM]}: {fmt(currAccumulating)} → vence {cardSettings.dueDay}/{NM+1}</div></div></div>
         </div>
@@ -1007,7 +1007,7 @@ export default function App() {
       {(urgentRegular.length>0||resumenIsUrgent)&&(
         <div style={S.card()}>
           <div style={{fontSize:11,letterSpacing:3,color:C.gold,textTransform:"uppercase",marginBottom:10}}>📅 Próximos vencimientos</div>
-          {resumenIsUrgent&&(
+          {resumenIsUrgent&&prevResumenAmount>0&&(
             <div style={{...S.row,padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
               <div style={S.eBox("rgba(232,122,206,0.12)")}>💳</div>
               <div style={{flex:1}}><div style={{fontSize:14}}>Resumen {MONTHS_FULL[PM]}</div><div style={{fontSize:11,color:C.pink}}>Vence el {cardSettings.dueDay}</div></div>
