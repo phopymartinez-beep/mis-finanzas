@@ -990,7 +990,8 @@ export default function App() {
           <div style={{fontSize:24,color:C.pink,fontFamily:"Georgia"}}>{fmt(prevResumenAmount)}</div>
           <div style={{fontSize:11,color:"#7A4060",marginTop:3}}>Vence el {cardSettings.dueDay} de {MONTHS_FULL[CM]} · {resumenDaysLeft<0?`Venció hace ${Math.abs(resumenDaysLeft)}d`:resumenDaysLeft===0?"¡HOY!":resumenDaysLeft===1?"Mañana":`${resumenDaysLeft} días`}</div>
         </div>
-      ):currAccumulating>0?(
+      ):null}
+      {prevResumenPaid&&currAccumulating>0&&(
         <div style={{...S.card(),background:"rgba(90,232,154,0.05)",border:"1px solid rgba(90,232,154,0.15)"}}>
           <div style={S.row}><span style={{fontSize:20}}>✅</span><div style={{flex:1}}><div style={{fontSize:13,color:C.green}}>Resumen {MONTHS_FULL[PM]} pagado</div><div style={{fontSize:11,color:"#666",marginTop:2}}>Acumulando {MONTHS_FULL[CM]}: {fmt(currAccumulating)} → vence {cardSettings.dueDay}/{NM+1}</div></div></div>
         </div>
@@ -1047,3 +1048,4 @@ export default function App() {
     </div>
   );
 }
+
