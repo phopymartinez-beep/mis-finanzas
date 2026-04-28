@@ -984,7 +984,7 @@ export default function App() {
       {/* Budget bar */}
       {budget>0&&<div style={S.card()}><div style={{...S.row,marginBottom:8}}><span style={{flex:1,fontSize:12,color:"#888"}}>🎯 Presupuesto del mes</span><span style={{fontSize:13,color:budgetPct>=100?C.red:C.gold,fontFamily:"Georgia"}}>{fmt(thisMonthSpend)} / {fmt(budget)}</span></div><div style={{height:5,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(100,budgetPct)}%`,background:budgetPct>=100?`linear-gradient(90deg,${C.red},#FF8080)`:`linear-gradient(90deg,${C.green},#8BC34A)`,borderRadius:4}}/></div></div>}
       {/* Resumen tarjeta */}
-      {!prevResumenPaid?(
+      {!prevResumenPaid&&prevResumenAmount>0?(
         <div style={S.pinkC}>
           <div style={{...S.row,marginBottom:8}}><span style={{fontSize:11,color:C.pink,letterSpacing:2,textTransform:"uppercase",flex:1}}>💳 Resumen Tarjeta {MONTHS_FULL[PM]}</span><button onClick={()=>setTab("bills")} style={{background:"none",border:`1px solid rgba(232,122,206,0.3)`,borderRadius:7,padding:"4px 10px",color:C.pink,fontSize:11,cursor:"pointer"}}>Pagar →</button></div>
           <div style={{fontSize:24,color:C.pink,fontFamily:"Georgia"}}>{fmt(prevResumenAmount)}</div>
