@@ -918,6 +918,7 @@ export default function App() {
       ))}
       <button style={S.fab} onClick={()=>setModal("account")}>+</button>
       <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
+      </div>
     </div>
   );
 
@@ -999,6 +1000,7 @@ export default function App() {
       </div>
       <div style={{height:80}}/>
       <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
+      </div>
     </div>
   );
 
@@ -1086,8 +1088,7 @@ export default function App() {
       <div style={{height:80}}/>
       <button style={S.fab} onClick={()=>setModal("txn")}>+</button>
       <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
+      </div>
     </div>
   );
 }
-
-    
