@@ -461,8 +461,8 @@ export default function App() {
   // ─── STYLES ────────────────────────────────────────────────────────────────
   const C={gold:"#C8A97E",red:"#E85A5A",green:"#5AE89A",blue:"#5A9BE8",pink:"#E87ACE",purple:"#A07CFE",bg:"#0D0D12",text:"#EDE9E3"};
   const S={
-    app:   (mob)=>mob?{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",maxWidth:430,margin:"0 auto",paddingBottom:80}:{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",display:"flex",width:"100%"},
-    content:{flex:1,overflowY:"auto",paddingBottom:40,maxWidth:680,minWidth:0},
+    app:   (mob)=>mob?{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",maxWidth:430,margin:"0 auto",paddingBottom:80,overflow:"hidden"}:{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",display:"flex",width:"100%"},
+    content:{flex:1,overflowY:"auto",paddingBottom:40,minWidth:0},
     hdr:   {padding:"24px 20px 12px",borderBottom:"1px solid rgba(200,169,126,0.1)"},
     ey:    {fontSize:11,letterSpacing:4,color:C.gold,textTransform:"uppercase",marginBottom:2},
     h1:    {fontSize:22,margin:0,fontWeight:"normal"},
@@ -489,8 +489,8 @@ export default function App() {
     sidebar:{width:220,background:"#111118",borderRight:"1px solid rgba(200,169,126,0.15)",display:"flex",flexDirection:"column",padding:"24px 0",flexShrink:0,minHeight:"100vh",position:"sticky",top:0,height:"100vh",overflowY:"auto"},
     nBtn:  a=>({background:"none",border:"none",color:a?C.gold:"#333",fontSize:10,letterSpacing:2,textTransform:"uppercase",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"0 8px"}),
     sBtn:  a=>({padding:"10px 20px",background:a?"rgba(200,169,126,0.1)":"transparent",borderLeft:a?"2px solid #C8A97E":"2px solid transparent",cursor:"pointer",display:"flex",alignItems:"center",gap:10,border:"none",width:"100%",textAlign:"left",color:a?C.gold:"#666",fontSize:13,fontFamily:"Georgia,serif"}),
-    modal: {position:"fixed",inset:0,background:C.bg,zIndex:200,overflowY:"auto",maxWidth:430,margin:"0 auto"},
-    fab:   {position:"fixed",bottom:22,right:20,width:52,height:52,borderRadius:"50%",background:C.gold,border:"none",fontSize:26,color:C.bg,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 20px rgba(200,169,126,0.35)",zIndex:99},
+    modal: (mob)=>mob?{position:"fixed",inset:0,background:C.bg,zIndex:200,overflowY:"auto",maxWidth:430,margin:"0 auto"}:{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:200,display:"flex",alignItems:"flex-start",justifyContent:"center",overflowY:"auto",paddingTop:40},
+    fab:   {position:"fixed",bottom:22,right:28,width:52,height:52,borderRadius:"50%",background:C.gold,border:"none",fontSize:26,color:C.bg,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 20px rgba(200,169,126,0.35)",zIndex:99},
     xBtn:  {background:"none",border:"none",color:"#333",cursor:"pointer",fontSize:16,padding:"0 2px",flexShrink:0},
     penBtn:{background:"none",border:"none",color:"#555",cursor:"pointer",fontSize:15,padding:"0 2px",flexShrink:0},
     back:  {background:"none",border:"none",color:C.gold,fontSize:22,cursor:"pointer"},
@@ -665,15 +665,15 @@ export default function App() {
     </div>
   );
 
-  if(modal==="txn")     return <div style={S.modal}>{TxnModalBody({onSave:addTxn, saveLabel:"Guardar"})}</div>;
-  if(modal==="editTxn") return <div style={S.modal}>{TxnModalBody({onSave:saveTxnEdit, saveLabel:"Guardar cambios", isEdit:true})}</div>;
-  if(modal==="bill")    return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Nuevo compromiso mensual</div></div>{BillFormBody({onSave:addBill, saveLabel:"Guardar compromiso"})}</div></div>;
-  if(modal==="editBill")return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Editar compromiso</div></div>{BillFormBody({onSave:saveBillEdit, saveLabel:"Guardar cambios"})}</div></div>;
-  if(modal==="account") return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Nueva cuenta</div></div>{AccFormBody({onSave:addAccount, saveLabel:"Crear cuenta"})}</div></div>;
-  if(modal==="editAcc") return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Editar cuenta</div></div>{AccFormBody({onSave:saveAccEdit, saveLabel:"Guardar cambios"})}</div></div>;
+  if(modal==="txn")     return <div style={S.modal(isMobile)}><div style={isMobile?{}:{background:C.bg,borderRadius:16,maxWidth:500,width:"100%",padding:"0 0 20px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>{TxnModalBody({onSave:addTxn, saveLabel:"Guardar"})}</div></div>;
+  if(modal==="editTxn") return <div style={S.modal(isMobile)}><div style={isMobile?{}:{background:C.bg,borderRadius:16,maxWidth:500,width:"100%",padding:"0 0 20px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>{TxnModalBody({onSave:saveTxnEdit, saveLabel:"Guardar cambios", isEdit:true})}</div></div>;
+  if(modal==="bill")    return <div style={S.modal(isMobile)}><div style={isMobile?{}:{background:C.bg,borderRadius:16,maxWidth:500,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Nuevo compromiso mensual</div></div>{BillFormBody({onSave:addBill, saveLabel:"Guardar compromiso"})}</div></div></div>;
+  if(modal==="editBill")return <div style={S.modal(isMobile)}><div style={isMobile?{}:{background:C.bg,borderRadius:16,maxWidth:500,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Editar compromiso</div></div>{BillFormBody({onSave:saveBillEdit, saveLabel:"Guardar cambios"})}</div></div></div>;
+  if(modal==="account") return <div style={S.modal(isMobile)}><div style={isMobile?{}:{background:C.bg,borderRadius:16,maxWidth:500,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Nueva cuenta</div></div>{AccFormBody({onSave:addAccount, saveLabel:"Crear cuenta"})}</div></div></div>;
+  if(modal==="editAcc") return <div style={S.modal(isMobile)}><div style={isMobile?{}:{background:C.bg,borderRadius:16,maxWidth:500,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Editar cuenta</div></div>{AccFormBody({onSave:saveAccEdit, saveLabel:"Guardar cambios"})}</div></div></div>;
 
   if(modal==="saving") return(
-    <div style={S.modal}><div style={{padding:"28px 20px"}}>
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
       <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Nueva meta de ahorro</div></div>
       <label style={S.lbl}>¿Para qué?</label><input style={{...S.inp,marginBottom:14}} type="text" placeholder="ej: Cámara…" value={savForm.name} onChange={e=>setSavForm(f=>({...f,name:e.target.value}))}/>
       <label style={S.lbl}>Objetivo ($)</label><input style={{...S.inp,marginBottom:14}} type="number" value={savForm.goal} onChange={e=>setSavForm(f=>({...f,goal:e.target.value}))}/>
@@ -683,7 +683,7 @@ export default function App() {
   );
 
   if(modal==="cats") return(
-    <div style={S.modal}><div style={{padding:"28px 20px"}}>
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
       <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div><div style={S.ey}>Configurar categorías</div><div style={{fontSize:18}}>Mis categorías</div></div></div>
       {/* Gastos */}
       <div style={{fontSize:11,letterSpacing:3,color:C.red,textTransform:"uppercase",marginBottom:10}}>💸 Categorías de gasto</div>
@@ -711,7 +711,7 @@ export default function App() {
   );
 
   if(modal==="addCat_gasto"||modal==="addCat_ingreso"||modal==="editCat") return(
-    <div style={S.modal}><div style={{padding:"28px 20px"}}>
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
       <div style={{...S.row,marginBottom:22}}><button onClick={()=>setModal("cats")} style={S.back}>←</button><div style={S.ey}>{modal==="editCat"?"Editar categoría":"Nueva categoría"}</div></div>
       <label style={S.lbl}>Nombre</label>
       <input style={{...S.inp,marginBottom:14}} type="text" placeholder="ej: Mascota, Auto…" value={catForm.name} onChange={e=>setCatForm(f=>({...f,name:e.target.value}))}/>
@@ -724,7 +724,7 @@ export default function App() {
   );
 
   if(modal==="usd") return(
-    <div style={S.modal}><div style={{padding:"28px 20px"}}>
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
       <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Tipo de cambio</div></div>
       <label style={S.lbl}>1 US$ = $ pesos</label>
       <input style={{...S.inp,fontSize:26,textAlign:"center",marginBottom:8}} type="number" placeholder={String(usdRate)} value={tempRate} onChange={e=>setTempRate(e.target.value)}/>
@@ -734,7 +734,7 @@ export default function App() {
   );
 
   if(modal==="budget") return(
-    <div style={S.modal}><div style={{padding:"28px 20px"}}>
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
       <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Presupuesto mensual</div></div>
       <label style={S.lbl}>¿Cuánto querés gastar por mes?</label>
       <input style={{...S.inp,fontSize:26,textAlign:"center",marginBottom:8}} type="number" placeholder={budget>0?String(budget):"$ 0"} value={tempBudget} onChange={e=>setTempBudget(e.target.value)}/>
@@ -744,7 +744,7 @@ export default function App() {
   );
 
   if(modal==="cardSettings") return(
-    <div style={S.modal}><div style={{padding:"28px 20px"}}>
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
       <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div><div style={S.ey}>Tarjeta de crédito</div><div style={{fontSize:18}}>Fechas</div></div></div>
       <div style={{background:"rgba(232,122,206,0.08)",border:"1px solid rgba(232,122,206,0.2)",borderRadius:14,padding:16,marginBottom:20,fontSize:13,color:C.pink,lineHeight:1.8}}>
         Cargos de <strong>Abril</strong> → Resumen Abril → vence día {cardSettings.dueDay} de <strong>Mayo</strong>
@@ -758,7 +758,7 @@ export default function App() {
   );
 
   if(modal==="payResumenModal") return(
-    <div style={S.modal}><div style={{padding:"28px 20px"}}>
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
       <div style={{...S.row,marginBottom:22}}><button onClick={()=>setModal(null)} style={S.back}>←</button><div><div style={S.ey}>Pagar resumen</div><div style={{fontSize:18}}>Tarjeta {MONTHS_FULL[PM]}</div></div></div>
       <div style={{background:"rgba(232,122,206,0.08)",border:"1px solid rgba(232,122,206,0.25)",borderRadius:16,padding:20,marginBottom:14,textAlign:"center"}}>
         <div style={{fontSize:11,color:C.pink,letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>Total a pagar</div>
