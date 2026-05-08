@@ -1,4 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { auth, provider, db } from "./firebase";
+import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
 // ─── INITIAL DATA ─────────────────────────────────────────────────────────────
@@ -79,12 +82,53 @@ export default function App() {
   const [cardSettings, setCardSettings]= useState({closingDay:25,dueDay:1});
   const [loading,      setLoading]     = useState(true);
   const [isMobile,     setIsMobile]    = useState(window.innerWidth < 768);
+  const [user,         setUser]        = useState(null);
+  const [authLoading,  setAuthLoading] = useState(true);
 
   useEffect(()=>{
     const handleResize=()=>setIsMobile(window.innerWidth<768);
     window.addEventListener("resize",handleResize);
     return ()=>window.removeEventListener("resize",handleResize);
   },[]);
+
+  // Auth listener
+  useEffect(()=>{
+    const unsub = onAuthStateChanged(auth, async (u)=>{
+      setUser(u);
+      setAuthLoading(false);
+      if(u){
+        // Load user data from Firestore
+        const ref = doc(db,"users",u.uid);
+        const snap = await getDoc(ref);
+        if(snap.exists()){
+          const data = snap.data();
+          if(data.txns)   setTxns(JSON.parse(data.txns));
+          if(data.bills){
+            const rawBills=JSON.parse(data.bills);
+            const migrated=rawBills.map(b=>b.isCard&&(!b.accountId||b.accountId==="")?{...b,accountId:"tarjeta"}:b);
+            setBills(migrated);
+          }
+          if(data.paid)     setPaid(JSON.parse(data.paid));
+          if(data.accounts) setAccounts(JSON.parse(data.accounts));
+          if(data.savings)  setSavings(JSON.parse(data.savings));
+          if(data.cardResumen) setCardResumen(JSON.parse(data.cardResumen));
+          if(data.usdRate)  setUsdRate(JSON.parse(data.usdRate));
+          if(data.budget)   setBudget(JSON.parse(data.budget));
+          if(data.cardSettings) setCardSettings(JSON.parse(data.cardSettings));
+          if(data.catsGasto)    setCatsGasto(JSON.parse(data.catsGasto));
+          if(data.catsIngreso)  setCatsIngreso(JSON.parse(data.catsIngreso));
+        }
+      }
+    });
+    return ()=>unsub();
+  },[]);
+
+  // Save to Firestore whenever data changes
+  const saveToFirestore = useCallback(async(updates)=>{
+    if(!user) return;
+    const ref = doc(db,"users",user.uid);
+    await setDoc(ref, updates, {merge:true});
+  },[user]);
   // Navigation
   const [modal,        setModal]       = useState(null);
   const [accountDetail,setAccountDetail]=useState(null); // accountId being viewed
@@ -274,7 +318,7 @@ export default function App() {
     }
     if(!txnForm.category) return;
     const t={id:Date.now(),type:addType,amount:parseFloat(txnForm.amount),category:txnForm.category,description:txnForm.description,date:txnForm.date,accountId:txnForm.accountId,currency:txnForm.currency||"ARS"};
-    const u=[t,...txns]; setTxns(u); await dbSave(KEYS.txns,u); doFlash(); closeModal();
+    const u=[t,...txns]; setTxns(u); await dbSave(KEYS.txns,u); await saveToFirestore({txns:JSON.stringify(u)}); doFlash(); closeModal();
   };
   const delTxn=async id=>{
     const txn=txns.find(t=>t.id===id);
@@ -321,8 +365,8 @@ export default function App() {
       newResumen = newResumen.filter(k=>k!==rKey);
     }
 
-    if(newPaid.length!==paid.length){ setPaid(newPaid); await dbSave(KEYS.paid,newPaid); }
-    if(newResumen.length!==cardResumen.length){ setCardResumen(newResumen); await dbSave(KEYS.cardResumen,newResumen); }
+    if(newPaid.length!==paid.length){ setPaid(newPaid); await dbSave(KEYS.paid,newPaid); await saveToFirestore({paid:JSON.stringify(newPaid)}); }
+    if(newResumen.length!==cardResumen.length){ setCardResumen(newResumen); await dbSave(KEYS.cardResumen,newResumen); await saveToFirestore({cardResumen:JSON.stringify(newResumen)}); }
   };
   const startEditTxn=(txn)=>{ setEditingTxn(txn.id); setTxnForm({amount:String(txn.amount),category:txn.category||"",description:txn.description||"",date:txn.date,accountId:txn.accountId||"",currency:txn.currency||"ARS",frequency:"once",installments:"",installmentAmountType:"perInstallment"}); setAddType(txn.type); setModal("editTxn"); };
   const saveTxnEdit=async()=>{
@@ -336,15 +380,15 @@ export default function App() {
     if(!billForm.name||!billForm.amount||!billForm.dueDay) return;
     const hasInst=billForm.installments&&parseInt(billForm.installments)>0;
     const b={id:Date.now(),name:billForm.name,emoji:billForm.emoji,amount:parseFloat(billForm.amount),dueDay:parseInt(billForm.dueDay),isCard:billForm.isCard,accountId:billForm.isCard?"tarjeta":(billForm.accountId||""),installments:hasInst?parseInt(billForm.installments):null,installmentCurrent:hasInst?parseInt(billForm.installmentCurrent):null,installmentStartMonth:null,installmentStartYear:null};
-    const u=[...bills,b]; setBills(u); await dbSave(KEYS.bills,u); doFlash(); closeModal();
+    const u=[...bills,b]; setBills(u); await dbSave(KEYS.bills,u); await saveToFirestore({bills:JSON.stringify(u)}); doFlash(); closeModal();
   };
-  const delBill=async id=>{ const u=bills.filter(b=>b.id!==id); setBills(u); await dbSave(KEYS.bills,u); };
+  const delBill=async id=>{ const u=bills.filter(b=>b.id!==id); setBills(u); await dbSave(KEYS.bills,u); await saveToFirestore({bills:JSON.stringify(u)}); };
   const startEditBill=(bill)=>{ setEditingBill(bill.id); setBillForm({name:bill.name,emoji:bill.emoji,amount:String(bill.amount),dueDay:String(bill.dueDay),isCard:bill.isCard,accountId:bill.accountId||"",installments:bill.installments?String(bill.installments):"",installmentCurrent:bill.installmentCurrent?String(bill.installmentCurrent):"1"}); setModal("editBill"); };
   const saveBillEdit=async()=>{
     if(!billForm.name||!billForm.amount||!billForm.dueDay) return;
     const hasInst=billForm.installments&&parseInt(billForm.installments)>0;
     const u=bills.map(b=>b.id===editingBill?{...b,name:billForm.name,emoji:billForm.emoji,amount:parseFloat(billForm.amount),dueDay:parseInt(billForm.dueDay),isCard:billForm.isCard,accountId:billForm.isCard?"tarjeta":(billForm.accountId||""),installments:hasInst?parseInt(billForm.installments):null,installmentCurrent:hasInst?parseInt(billForm.installmentCurrent):null}:b);
-    setBills(u); await dbSave(KEYS.bills,u); doFlash(); closeModal();
+    setBills(u); await dbSave(KEYS.bills,u); await saveToFirestore({bills:JSON.stringify(u)}); doFlash(); closeModal();
   };
 
   // ── Toggle paid ────────────────────────────────────────────────────────────
@@ -352,7 +396,7 @@ export default function App() {
     const key=paidKey(billId,m,y);
     if(paid.includes(key)){ const u=paid.filter(k=>k!==key); setPaid(u); await dbSave(KEYS.paid,u); }
     else{
-      const u=[...paid,key]; setPaid(u); await dbSave(KEYS.paid,u);
+      const u=[...paid,key]; setPaid(u); await dbSave(KEYS.paid,u); await saveToFirestore({paid:JSON.stringify(u)});
       const bill=bills.find(b=>b.id===billId);
       if(bill&&fromAccountId&&fromAccountId!=="none"){
         const txn={id:Date.now(),type:"gasto",amount:bill.amount,category:"Servicios",description:`Pago: ${bill.name}`,date:todayStr(),accountId:fromAccountId,currency:"ARS",_billId:billId,_paidM:m!==undefined?m:CM,_paidY:y!==undefined?y:CY};
@@ -367,24 +411,24 @@ export default function App() {
     const u=[...cardResumen,rKey]; setCardResumen(u); await dbSave(KEYS.cardResumen,u);
     if(fromAccountId&&fromAccountId!=="none"){
       const txn={id:Date.now(),type:"gasto",amount:rAmount,category:"Servicios",description:`Resumen Tarjeta ${MONTHS_FULL[PM]}`,date:todayStr(),accountId:fromAccountId,currency:"ARS",_cardResumenKey:rKey};
-      const tu=[txn,...txns]; setTxns(tu); await dbSave(KEYS.txns,tu);
+      const tu=[txn,...txns]; setTxns(tu); await dbSave(KEYS.txns,tu); await saveToFirestore({txns:JSON.stringify(tu)});
     }
     doFlash(); setResumenPayAcc(""); setModal(null);
   };
 
   // ── CRUD: Accounts ─────────────────────────────────────────────────────────
-  const addAccount=async()=>{ if(!accForm.name) return; const a={id:Date.now().toString(),name:accForm.name,emoji:accForm.emoji,color:accForm.color}; const u=[...accounts,a]; setAccounts(u); await dbSave(KEYS.accounts,u); doFlash(); closeModal(); };
-  const delAccount=async id=>{ const u=accounts.filter(a=>a.id!==id); setAccounts(u); await dbSave(KEYS.accounts,u); };
+  const addAccount=async()=>{ if(!accForm.name) return; const a={id:Date.now().toString(),name:accForm.name,emoji:accForm.emoji,color:accForm.color}; const u=[...accounts,a]; setAccounts(u); await dbSave(KEYS.accounts,u); await saveToFirestore({accounts:JSON.stringify(u)}); doFlash(); closeModal(); };
+  const delAccount=async id=>{ const u=accounts.filter(a=>a.id!==id); setAccounts(u); await dbSave(KEYS.accounts,u); await saveToFirestore({accounts:JSON.stringify(u)}); };
   const startEditAcc=(acc)=>{ setEditingAcc(acc.id); setAccForm({name:acc.name,emoji:acc.emoji,color:acc.color}); setModal("editAcc"); };
   const saveAccEdit=async()=>{
     const u=accounts.map(a=>a.id===editingAcc?{...a,name:accForm.name,emoji:accForm.emoji,color:accForm.color}:a);
-    setAccounts(u); await dbSave(KEYS.accounts,u); doFlash(); closeModal();
+    setAccounts(u); await dbSave(KEYS.accounts,u); await saveToFirestore({accounts:JSON.stringify(u)}); doFlash(); closeModal();
   };
 
   // ── CRUD: Savings ──────────────────────────────────────────────────────────
-  const addSaving=async()=>{ if(!savForm.name||!savForm.goal) return; const s={id:Date.now().toString(),name:savForm.name,goal:parseFloat(savForm.goal),saved:parseFloat(savForm.saved||0)}; const u=[...savings,s]; setSavings(u); await dbSave(KEYS.savings,u); doFlash(); closeModal(); };
-  const addToSaving=async()=>{ if(!addSavId||!addSavAmt) return; const u=savings.map(s=>s.id===addSavId?{...s,saved:s.saved+parseFloat(addSavAmt)}:s); setSavings(u); await dbSave(KEYS.savings,u); setAddSavId(null); setAddSavAmt(""); };
-  const delSaving=async id=>{ const u=savings.filter(s=>s.id!==id); setSavings(u); await dbSave(KEYS.savings,u); };
+  const addSaving=async()=>{ if(!savForm.name||!savForm.goal) return; const s={id:Date.now().toString(),name:savForm.name,goal:parseFloat(savForm.goal),saved:parseFloat(savForm.saved||0)}; const u=[...savings,s]; setSavings(u); await dbSave(KEYS.savings,u); await saveToFirestore({savings:JSON.stringify(u)}); doFlash(); closeModal(); };
+  const addToSaving=async()=>{ if(!addSavId||!addSavAmt) return; const u=savings.map(s=>s.id===addSavId?{...s,saved:s.saved+parseFloat(addSavAmt)}:s); setSavings(u); await dbSave(KEYS.savings,u); await saveToFirestore({savings:JSON.stringify(u)}); setAddSavId(null); setAddSavAmt(""); };
+  const delSaving=async id=>{ const u=savings.filter(s=>s.id!==id); setSavings(u); await dbSave(KEYS.savings,u); await saveToFirestore({savings:JSON.stringify(u)}); };
 
   // ── CRUD: Categories ───────────────────────────────────────────────────────
   const addCat=async(type)=>{
@@ -511,6 +555,34 @@ export default function App() {
     </>
   );
 
+  // Login with Google
+  const handleLogin = async()=>{ try{ await signInWithPopup(auth,provider); }catch(e){ console.error(e); } };
+  const handleLogout= async()=>{ await signOut(auth); setTxns([]); setBills(INITIAL_BILLS); setPaid([]); setAccounts(DEFAULT_ACCOUNTS); setSavings([]); setCardResumen([]); };
+
+  // Show loading while checking auth
+  if(authLoading) return(
+    <div style={{minHeight:"100vh",background:"#0D0D12",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Georgia,serif"}}>
+      <span style={{color:"#C8A97E",fontSize:16}}>Cargando…</span>
+    </div>
+  );
+
+  // Show login screen if not logged in
+  if(!user) return(
+    <div style={{minHeight:"100vh",background:"#0D0D12",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Georgia,serif",padding:20}}>
+      <div style={{textAlign:"center",maxWidth:360}}>
+        <div style={{fontSize:48,marginBottom:16}}>💰</div>
+        <div style={{fontSize:11,letterSpacing:4,color:"#C8A97E",textTransform:"uppercase",marginBottom:8}}>Bienvenida a</div>
+        <div style={{fontSize:32,color:"#EDE9E3",marginBottom:8}}>Mis Finanzas</div>
+        <div style={{fontSize:14,color:"#555",marginBottom:40,lineHeight:1.7}}>Tu app personal para gestionar ingresos, gastos y vencimientos.</div>
+        <button onClick={handleLogin} style={{display:"flex",alignItems:"center",gap:12,margin:"0 auto",padding:"14px 28px",borderRadius:14,background:"white",border:"none",cursor:"pointer",fontSize:15,fontFamily:"Georgia,serif",color:"#333",boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}}>
+          <img src="https://www.google.com/favicon.ico" width="20" height="20" alt="Google"/>
+          Entrar con Google
+        </button>
+        <div style={{fontSize:11,color:"#333",marginTop:20}}>Tus datos se guardan de forma segura y privada.</div>
+      </div>
+    </div>
+  );
+
   // Sidebar component for desktop
   const Sidebar = () => (
     <div style={S.sidebar}>
@@ -527,7 +599,12 @@ export default function App() {
         ))}
       </nav>
       <div style={{padding:"16px 20px"}}>
-        <button onClick={()=>setModal("txn")} style={{width:"100%",padding:"12px",borderRadius:10,background:"rgba(200,169,126,0.15)",border:"1px solid rgba(200,169,126,0.3)",color:C.gold,fontSize:13,cursor:"pointer",fontFamily:"Georgia,serif"}}>+ Nuevo movimiento</button>
+        <button onClick={()=>setModal("txn")} style={{width:"100%",padding:"12px",borderRadius:10,background:"rgba(200,169,126,0.15)",border:"1px solid rgba(200,169,126,0.3)",color:C.gold,fontSize:13,cursor:"pointer",fontFamily:"Georgia,serif",marginBottom:8}}>+ Nuevo movimiento</button>
+        <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0"}}>
+          <img src={user?.photoURL} width={24} height={24} style={{borderRadius:"50%"}} alt=""/>
+          <span style={{fontSize:11,color:"#555",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user?.displayName}</span>
+          <button onClick={handleLogout} style={{background:"none",border:"none",color:"#444",cursor:"pointer",fontSize:11}}>Salir</button>
+        </div>
       </div>
     </div>
   );
