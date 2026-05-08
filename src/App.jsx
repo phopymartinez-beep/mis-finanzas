@@ -81,12 +81,12 @@ export default function App() {
   const [budget,       setBudget]      = useState(0);
   const [cardSettings, setCardSettings]= useState({closingDay:25,dueDay:1});
   const [loading,      setLoading]     = useState(true);
-  const [isMobile,     setIsMobile]    = useState(window.innerWidth < 768);
+  const [isMobile,     setIsMobile]    = useState(window.innerWidth < 900);
   const [user,         setUser]        = useState(null);
   const [authLoading,  setAuthLoading] = useState(true);
 
   useEffect(()=>{
-    const handleResize=()=>setIsMobile(window.innerWidth<768);
+    const handleResize=()=>setIsMobile(window.innerWidth<900);
     window.addEventListener("resize",handleResize);
     return ()=>window.removeEventListener("resize",handleResize);
   },[]);
@@ -461,8 +461,8 @@ export default function App() {
   // ─── STYLES ────────────────────────────────────────────────────────────────
   const C={gold:"#C8A97E",red:"#E85A5A",green:"#5AE89A",blue:"#5A9BE8",pink:"#E87ACE",purple:"#A07CFE",bg:"#0D0D12",text:"#EDE9E3"};
   const S={
-    app:   (mob)=>mob?{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",maxWidth:430,margin:"0 auto",paddingBottom:80}:{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",display:"flex"},
-    content:{flex:1,overflowY:"auto",paddingBottom:20},
+    app:   (mob)=>mob?{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",maxWidth:430,margin:"0 auto",paddingBottom:80}:{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",display:"flex",width:"100%"},
+    content:{flex:1,overflowY:"auto",paddingBottom:40,maxWidth:680,minWidth:0},
     hdr:   {padding:"24px 20px 12px",borderBottom:"1px solid rgba(200,169,126,0.1)"},
     ey:    {fontSize:11,letterSpacing:4,color:C.gold,textTransform:"uppercase",marginBottom:2},
     h1:    {fontSize:22,margin:0,fontWeight:"normal"},
@@ -486,7 +486,7 @@ export default function App() {
     tog:   on=>({width:46,height:24,borderRadius:12,background:on?C.gold:"#222",border:"none",cursor:"pointer",position:"relative",flexShrink:0}),
     togDot:on=>({position:"absolute",top:3,left:on?25:3,width:18,height:18,borderRadius:"50%",background:on?C.bg:"#555",transition:"left 0.2s"}),
     nav:   (mob)=>mob?{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:C.bg,borderTop:"1px solid rgba(200,169,126,0.1)",display:"flex",justifyContent:"space-around",padding:"10px 0 14px",zIndex:50}:{display:"none"},
-    sidebar:{width:200,background:"#111118",borderRight:"1px solid rgba(200,169,126,0.15)",display:"flex",flexDirection:"column",padding:"24px 0",flexShrink:0,minHeight:"100vh"},
+    sidebar:{width:220,background:"#111118",borderRight:"1px solid rgba(200,169,126,0.15)",display:"flex",flexDirection:"column",padding:"24px 0",flexShrink:0,minHeight:"100vh",position:"sticky",top:0,height:"100vh",overflowY:"auto"},
     nBtn:  a=>({background:"none",border:"none",color:a?C.gold:"#333",fontSize:10,letterSpacing:2,textTransform:"uppercase",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"0 8px"}),
     sBtn:  a=>({padding:"10px 20px",background:a?"rgba(200,169,126,0.1)":"transparent",borderLeft:a?"2px solid #C8A97E":"2px solid transparent",cursor:"pointer",display:"flex",alignItems:"center",gap:10,border:"none",width:"100%",textAlign:"left",color:a?C.gold:"#666",fontSize:13,fontFamily:"Georgia,serif"}),
     modal: {position:"fixed",inset:0,background:C.bg,zIndex:200,overflowY:"auto",maxWidth:430,margin:"0 auto"},
@@ -665,12 +665,12 @@ export default function App() {
     </div>
   );
 
-  if(modal==="txn")     return <div style={S.modal}><TxnModalBody onSave={addTxn} saveLabel="Guardar"/></div>;
-  if(modal==="editTxn") return <div style={S.modal}><TxnModalBody onSave={saveTxnEdit} saveLabel="Guardar cambios" isEdit={true}/></div>;
-  if(modal==="bill")    return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Nuevo compromiso mensual</div></div><BillFormBody onSave={addBill} saveLabel="Guardar compromiso"/></div></div>;
-  if(modal==="editBill")return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Editar compromiso</div></div><BillFormBody onSave={saveBillEdit} saveLabel="Guardar cambios"/></div></div>;
-  if(modal==="account") return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Nueva cuenta</div></div><AccFormBody onSave={addAccount} saveLabel="Crear cuenta"/></div></div>;
-  if(modal==="editAcc") return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Editar cuenta</div></div><AccFormBody onSave={saveAccEdit} saveLabel="Guardar cambios"/></div></div>;
+  if(modal==="txn")     return <div style={S.modal}>{TxnModalBody({onSave:addTxn, saveLabel:"Guardar"})}</div>;
+  if(modal==="editTxn") return <div style={S.modal}>{TxnModalBody({onSave:saveTxnEdit, saveLabel:"Guardar cambios", isEdit:true})}</div>;
+  if(modal==="bill")    return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Nuevo compromiso mensual</div></div>{BillFormBody({onSave:addBill, saveLabel:"Guardar compromiso"})}</div></div>;
+  if(modal==="editBill")return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Editar compromiso</div></div>{BillFormBody({onSave:saveBillEdit, saveLabel:"Guardar cambios"})}</div></div>;
+  if(modal==="account") return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Nueva cuenta</div></div>{AccFormBody({onSave:addAccount, saveLabel:"Crear cuenta"})}</div></div>;
+  if(modal==="editAcc") return <div style={S.modal}><div style={{padding:"28px 20px"}}><div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Editar cuenta</div></div>{AccFormBody({onSave:saveAccEdit, saveLabel:"Guardar cambios"})}</div></div>;
 
   if(modal==="saving") return(
     <div style={S.modal}><div style={{padding:"28px 20px"}}>
