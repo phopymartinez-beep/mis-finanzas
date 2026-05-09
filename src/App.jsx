@@ -299,28 +299,47 @@ export default function App() {
   // ── CRUD: Transactions ────────────────────────────────────────────────────
   const addTxn=async()=>{
     if(!txnForm.amount||!txnForm.accountId) return;
+
     if(txnForm.frequency==="monthly"){
       if(!txnForm.description) return;
       const day=parseInt(txnForm.date)||15;
       const isCard=txnForm.accountId==="tarjeta";
       const b={id:Date.now(),name:txnForm.description,emoji:"📋",amount:parseFloat(txnForm.amount),dueDay:day,isCard,accountId:txnForm.accountId,installments:null,installmentCurrent:null,installmentStartMonth:null,installmentStartYear:null};
-      const u=[...bills,b]; setBills(u); await dbSave(KEYS.bills,u); doFlash(); closeModal(); return;
+      const u=[...bills,b];
+      setBills(u);
+      await dbSave(KEYS.bills,u);
+      await saveToFirestore({bills:JSON.stringify(u)}); // ✅ Bug 1 fix: sync Firestore
+      doFlash(); closeModal(); return;
     }
+
     if(txnForm.frequency==="installments"&&txnForm.installments){
       const totalInstallments=parseInt(txnForm.installments);
       let perInstallment=parseFloat(txnForm.amount);
       if(txnForm.installmentAmountType==="total") perInstallment=Math.round(perInstallment/totalInstallments);
       const isCard=txnForm.accountId==="tarjeta";
       const chargeDate=new Date(txnForm.date+"T12:00:00");
-      const startM=isCard?chargeDate.getMonth():chargeDate.getMonth();
-      const startY=isCard?chargeDate.getFullYear():chargeDate.getFullYear();
+      const startM=chargeDate.getMonth();
+      const startY=chargeDate.getFullYear();
       const day=chargeDate.getDate()||1;
       const b={id:Date.now(),name:txnForm.description||txnForm.category,emoji:"💳",amount:perInstallment,dueDay:day,isCard,accountId:txnForm.accountId,installments:totalInstallments,installmentCurrent:1,installmentStartMonth:startM,installmentStartYear:startY};
-      const u=[...bills,b]; setBills(u); await dbSave(KEYS.bills,u); doFlash(); closeModal(); return;
+      const u=[...bills,b];
+      setBills(u);
+      await dbSave(KEYS.bills,u);
+      await saveToFirestore({bills:JSON.stringify(u)}); // ✅ Bug 1 fix: sync Firestore
+      doFlash(); closeModal(); return;
     }
-    if(!txnForm.category) return;
-    const t={id:Date.now(),type:addType,amount:parseFloat(txnForm.amount),category:txnForm.category,description:txnForm.description,date:txnForm.date,accountId:txnForm.accountId,currency:txnForm.currency||"ARS"};
-    const u=[t,...txns]; setTxns(u); await dbSave(KEYS.txns,u); await saveToFirestore({txns:JSON.stringify(u)}); doFlash(); closeModal();
+
+    // ✅ Bug 2 fix: para gastos en tarjeta de única vez, la categoría es opcional
+    // (se guarda igual, con categoría vacía si no se seleccionó)
+    if(addType==="gasto"&&!txnForm.category&&txnForm.accountId!=="tarjeta") return;
+    if(addType==="ingreso"&&!txnForm.category) return;
+
+    const t={id:Date.now(),type:addType,amount:parseFloat(txnForm.amount),category:txnForm.category||"Otros",description:txnForm.description,date:txnForm.date,accountId:txnForm.accountId,currency:txnForm.currency||"ARS"};
+    const u=[t,...txns];
+    setTxns(u);
+    await dbSave(KEYS.txns,u);
+    await saveToFirestore({txns:JSON.stringify(u)});
+    doFlash(); closeModal();
   };
   const delTxn=async id=>{
     const txn=txns.find(t=>t.id===id);
