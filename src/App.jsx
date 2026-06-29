@@ -548,9 +548,9 @@ export default function App() {
       {!isEdit&&addType==="gasto"&&<>
         <label style={S.lbl}>Frecuencia</label>
         <div style={S.tRow3}>
-          <button style={S.tBtn(txnForm.frequency==="once",C.gold)} onClick={()=>setTxnForm(f=>({...f,frequency:"once",installments:""}))}>1× Única vez</button>
-          <button style={S.tBtn(txnForm.frequency==="monthly",C.green)} onClick={()=>setTxnForm(f=>({...f,frequency:"monthly",installments:""}))}>🔁 Mensual</button>
-          <button style={S.tBtn(txnForm.frequency==="installments",C.purple)} onClick={()=>setTxnForm(f=>({...f,frequency:"installments"}))}>💳 Cuotas</button>
+          <button style={S.tBtn(txnForm.frequency==="once",C.gold)} onClick={()=>setTxnForm(f=>({...f,frequency:"once",installments:"",date:todayStr()}))}>1× Única vez</button>
+          <button style={S.tBtn(txnForm.frequency==="monthly",C.green)} onClick={()=>setTxnForm(f=>({...f,frequency:"monthly",installments:"",date:""}))}>🔁 Mensual</button>
+          <button style={S.tBtn(txnForm.frequency==="installments",C.purple)} onClick={()=>setTxnForm(f=>({...f,frequency:"installments",date:todayStr()}))}>💳 Cuotas</button>
         </div>
         {txnForm.frequency==="installments"&&<>
           <div style={S.tRow}>
@@ -580,7 +580,10 @@ export default function App() {
       <label style={S.lbl}>{txnForm.frequency==="monthly"?"Descripción (nombre)":"Descripción"}</label>
       <input style={{...S.inp,marginBottom:12}} type="text" placeholder={txnForm.frequency==="monthly"?"ej: Spotify":"ej: almuerzo"} value={txnForm.description} onChange={e=>setTxnForm(f=>({...f,description:e.target.value}))}/>
       <label style={S.lbl}>{txnForm.frequency==="monthly"?"Día del mes":"Fecha"}</label>
-      <input style={{...S.inp,marginBottom:20}} type={txnForm.frequency==="monthly"?"number":"date"} min="1" max="31" value={txnForm.date} onChange={e=>setTxnForm(f=>({...f,date:e.target.value}))}/>
+      {txnForm.frequency==="monthly"
+        ? <input style={{...S.inp,marginBottom:20}} type="number" min="1" max="31" placeholder="ej: 15" value={txnForm.date} onChange={e=>setTxnForm(f=>({...f,date:e.target.value}))}/>
+        : <input style={{...S.inp,marginBottom:20}} type="date" value={txnForm.date||todayStr()} onChange={e=>setTxnForm(f=>({...f,date:e.target.value}))}/>
+      }
       <button style={S.sub()} onClick={onSave}>{flash?"✅ Guardado":saveLabel}</button>
     </div>
   );
