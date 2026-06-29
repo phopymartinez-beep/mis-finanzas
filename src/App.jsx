@@ -53,6 +53,7 @@ const KEYS = {
   usdRate:"fv6-usdrate", budget:"fv6-budget",
   cardSettings:"fv6-card", cardResumen:"fv6-resumen",
   catsGasto:"fv6-cats-gasto", catsIngreso:"fv6-cats-ingreso",
+  people:"fv6-people", tercerosSeen:"fv6-terceros-seen",
 };
 const EMOJIS_BILL = ["📋","🏠","💡","📱","🚗","💊","🎓","🛒","💈","🏋️","📺","🌐","🎵","🍕","🔥","🛡️","🖼️","🎬","🏰","🤖","🎨","✂️","🐾","✈️","🎮"];
 const EMOJIS_ACC  = ["💼","🎨","💵","🏦","💳","🏠","📱","🚗","💡","🎓","🛒","✨","💎","🌟"];
@@ -88,6 +89,8 @@ export default function App() {
   const [usdRate,setUsdRate]=useState(1200);
   const [budget,setBudget]=useState(0);
   const [cardSettings,setCardSettings]=useState({closingDay:25,dueDay:1});
+  const [people,setPeople]=useState([]); // 🆕 cuentas de terceros
+  const [tercerosSeen,setTercerosSeen]=useState(false); // 🆕 ya vio el intro
   const [loading,setLoading]=useState(true);
   const [isMobile,setIsMobile]=useState(window.innerWidth<900);
   const [user,setUser]=useState(null);
@@ -118,6 +121,8 @@ export default function App() {
           if(d.cardSettings) setCardSettings(JSON.parse(d.cardSettings));
           if(d.catsGasto)    setCatsGasto(JSON.parse(d.catsGasto));
           if(d.catsIngreso)  setCatsIngreso(JSON.parse(d.catsIngreso));
+          if(d.people)       setPeople(JSON.parse(d.people));
+          if(d.tercerosSeen) setTercerosSeen(JSON.parse(d.tercerosSeen));
         }
       }
     });
@@ -145,7 +150,8 @@ export default function App() {
   const [editingCat,setEditingCat]=useState(null);
   const [resetTaps,setResetTaps]=useState(0); // 🆕 contador oculto para Reinicio
 
-  const emptyTxn={amount:"",category:"",description:"",date:todayStr(),accountId:"",currency:"ARS",frequency:"once",installments:"",installmentAmountType:"perInstallment"};
+  const emptyTxn={amount:"",category:"",description:"",date:todayStr(),accountId:"",currency:"ARS",frequency:"once",installments:"",installmentAmountType:"perInstallment",fromId:"",toId:""};
+  const emptyPerson={name:"",emoji:"🧑",color:"#5A9BE8",saldo:"",saldoTipo:"teDebe"};
   const emptyBill={name:"",emoji:"📋",amount:"",dueDay:"",isCard:false,accountId:"",installments:"",installmentCurrent:"1"};
   const emptyAcc={name:"",emoji:"💼",color:"#5AE89A"};
   const emptySav={name:"",goal:"",saved:""};
@@ -155,6 +161,9 @@ export default function App() {
   const [accForm,setAccForm]=useState(emptyAcc);
   const [savForm,setSavForm]=useState(emptySav);
   const [catForm,setCatForm]=useState(emptyCat);
+  const [personForm,setPersonForm]=useState(emptyPerson); // 🆕
+  const [editingPerson,setEditingPerson]=useState(null);   // 🆕
+  const [terceroDetail,setTerceroDetail]=useState(null);   // 🆕 persona abierta en el modal
   const [addSavId,setAddSavId]=useState(null);
   const [addSavAmt,setAddSavAmt]=useState("");
   const [tempRate,setTempRate]=useState("");
@@ -163,14 +172,16 @@ export default function App() {
 
   useEffect(()=>{
     (async()=>{
-      const [t,b,p,a,s,r,bg,cs,cr,cg,ci]=await Promise.all([
+      const [t,b,p,a,s,r,bg,cs,cr,cg,ci,pe,ts]=await Promise.all([
         dbLoad(KEYS.txns),dbLoad(KEYS.bills),dbLoad(KEYS.paid),dbLoad(KEYS.accounts),
         dbLoad(KEYS.savings),dbLoad(KEYS.usdRate),dbLoad(KEYS.budget),dbLoad(KEYS.cardSettings),
         dbLoad(KEYS.cardResumen),dbLoad(KEYS.catsGasto),dbLoad(KEYS.catsIngreso),
+        dbLoad(KEYS.people),dbLoad(KEYS.tercerosSeen),
       ]);
       if(t) setTxns(t); if(p) setPaid(p); if(s) setSavings(s);
       if(r) setUsdRate(r); if(bg) setBudget(bg); if(cs) setCardSettings(cs);
       if(cr) setCardResumen(cr); if(cg) setCatsGasto(cg); if(ci) setCatsIngreso(ci);
+      if(pe) setPeople(pe); if(ts) setTercerosSeen(ts);
       const baseAccs=a||DEFAULT_ACCOUNTS;
       const hasTarjeta=baseAccs.some(ac=>ac.id==="tarjeta");
       const finalAccs=hasTarjeta?baseAccs:[...baseAccs,{id:"tarjeta",name:"Tarjeta",emoji:"💳",color:"#E87ACE"}];
@@ -193,6 +204,7 @@ export default function App() {
     setPayWith({billId:null,accountId:""}); setResumenPayAcc(""); setResumenPayTarget(null);
     setTempRate(""); setTempBudget(""); setTempCard({closingDay:"",dueDay:""});
     setAddSavId(null); setAddSavAmt(""); setDelTarget(null);
+    setPersonForm(emptyPerson); setEditingPerson(null);
   };
 
   const {m:CM,y:CY}=getNow();
@@ -299,17 +311,40 @@ export default function App() {
   const urgentRegular=pendingRegularBills.filter(b=>daysUntil(b.dueDay,CM,CY)<=5).sort((a,b2)=>daysUntil(a.dueDay,CM,CY)-daysUntil(b2.dueDay,CM,CY));
   const resumenIsUrgent=!prevResumenPaid&&resumenDaysLeft<=5&&prevResumenAmount>0;
 
-  const totalIn=txns.filter(t=>t.type==="ingreso").reduce((s,t)=>s+toARS(t),0);
-  const totalOut=txns.filter(t=>t.type==="gasto").reduce((s,t)=>s+toARS(t),0);
+  // 🆕 ids de cuentas reales (las personas/terceros NO cuentan como plata propia)
+  const realIds=new Set(accounts.map(a=>a.id));
+  const isPersonId=(id)=>people.some(p=>p.id===id);
+  // Ingresos/Gastos propios (excluye gastos financiados por terceros, que no son plata tuya)
+  const totalIn=txns.filter(t=>t.type==="ingreso"&&realIds.has(t.accountId)).reduce((s,t)=>s+toARS(t),0);
+  const totalOut=txns.filter(t=>t.type==="gasto"&&realIds.has(t.accountId)).reduce((s,t)=>s+toARS(t),0);
+  // transferencias que entran/salen de cuentas reales (devolver/prestar/que te depositen)
+  const transferNetReal=txns.filter(t=>t.type==="transfer").reduce((s,t)=>s+(realIds.has(t.toId)?toARS(t):0)-(realIds.has(t.fromId)?toARS(t):0),0);
   const txnBalance=totalIn-totalOut;
-  const realBalance=txnBalance-pendingTotal;
+  const realBalance=txnBalance+transferNetReal-pendingTotal;
 
   const accountBalance=(accId)=>{
     const inc=txns.filter(t=>t.type==="ingreso"&&t.accountId===accId).reduce((s,t)=>s+toARS(t),0);
     const out=txns.filter(t=>t.type==="gasto"&&t.accountId===accId).reduce((s,t)=>s+toARS(t),0);
-    if(accId==="tarjeta") return inc-out-(prevResumenPaid?0:prevResumenAmount);
+    const tIn=txns.filter(t=>t.type==="transfer"&&t.toId===accId).reduce((s,t)=>s+toARS(t),0);
+    const tOut=txns.filter(t=>t.type==="transfer"&&t.fromId===accId).reduce((s,t)=>s+toARS(t),0);
+    const base=inc-out+tIn-tOut;
+    if(isPersonId(accId)) return base; // personas: + = te debe, − = le debés (sin deudas ni resumen)
+    if(accId==="tarjeta") return base-(prevResumenPaid?0:prevResumenAmount);
     const debt=regularBills.filter(b=>b.accountId===accId&&!isPaid(b.id,CM,CY)&&(b.installments===null||b.installmentCurrent<=b.installments)).reduce((s,b)=>s+b.amount,0);
-    return inc-out-debt;
+    return base-debt;
+  };
+  // 🆕 nombre/emoji/color de cualquier entidad (cuenta real o persona)
+  const entityOf=(id)=>accounts.find(a=>a.id===id)||people.find(p=>p.id===id)||null;
+  // 🆕 movimientos asociados a una entidad (cuenta real o persona), con dirección de impacto
+  const entityMovements=(id)=>{
+    const res=[];
+    txns.forEach(t=>{
+      if(t.type==="transfer"){
+        if(t.fromId===id){ const o=entityOf(t.toId); res.push({t,dir:-1,label:t.description||`Transferencia → ${o?o.name:"?"}`}); }
+        else if(t.toId===id){ const o=entityOf(t.fromId); res.push({t,dir:1,label:t.description||`Transferencia ← ${o?o.name:"?"}`}); }
+      } else if(t.accountId===id){ res.push({t,dir:t.type==="ingreso"?1:-1,label:t.description||t.category}); }
+    });
+    return res.sort((a,b)=>new Date(b.t.date+"T12:00:00")-new Date(a.t.date+"T12:00:00"));
   };
 
   const thisMonthSpend=txns.filter(t=>{ if(t.type!=="gasto") return false; const dt=new Date(t.date+"T12:00:00"); return dt.getMonth()===CM&&dt.getFullYear()===CY; }).reduce((s,t)=>s+toARS(t),0)+regularBills.filter(b=>isPaid(b.id,CM,CY)).reduce((s,b)=>s+b.amount,0);
@@ -327,6 +362,20 @@ export default function App() {
   const gatosCatData=catsGasto.map(c=>({...c,total:txns.filter(t=>t.type==="gasto"&&t.category===c.name).reduce((s,t)=>s+toARS(t),0)})).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
 
   // ── CRUD: Transactions ────────────────────────────────────────────────────
+  // 🆕 Transacción: mover plata de una cuenta a otra (real o de tercero)
+  const addTransfer=async()=>{
+    if(!txnForm.amount||!txnForm.fromId||!txnForm.toId||txnForm.fromId===txnForm.toId) return;
+    const t={id:Date.now(),type:"transfer",fromId:txnForm.fromId,toId:txnForm.toId,amount:parseFloat(txnForm.amount),date:txnForm.date,description:txnForm.description,currency:txnForm.currency||"ARS"};
+    const u=[t,...txns]; setTxns(u); await dbSave(KEYS.txns,u); await saveToFirestore({txns:JSON.stringify(u)});
+    doFlash(); closeModal();
+  };
+  // 🆕 CRUD personas (cuentas de terceros)
+  const markTercerosSeen=async()=>{ setTercerosSeen(true); await dbSave(KEYS.tercerosSeen,true); await saveToFirestore({tercerosSeen:JSON.stringify(true)}); };
+  const addPerson=async()=>{ if(!personForm.name) return; const pid="p"+Date.now().toString(); const pr={id:pid,name:personForm.name,emoji:personForm.emoji,color:personForm.color}; const u=[...people,pr]; setPeople(u); await dbSave(KEYS.people,u); await saveToFirestore({people:JSON.stringify(u)}); const sal=parseFloat(personForm.saldo); if(sal>0){ const signo=personForm.saldoTipo==="teDebe"?1:-1; const t={id:Date.now()+1,type:"transfer",fromId:signo>0?"_init":pid,toId:signo>0?pid:"_init",amount:sal,currency:"ARS",date:todayStr(),description:"Saldo inicial"}; const tu=[t,...txns]; setTxns(tu); await dbSave(KEYS.txns,tu); await saveToFirestore({txns:JSON.stringify(tu)}); } doFlash(); setPersonForm(emptyPerson); setEditingPerson(null); setModal("terceros"); };
+  const delPerson=async id=>{ const u=people.filter(p=>p.id!==id); setPeople(u); await dbSave(KEYS.people,u); await saveToFirestore({people:JSON.stringify(u)}); if(terceroDetail===id) setTerceroDetail(null); };
+  const startEditPerson=(pr)=>{ setEditingPerson(pr.id); setPersonForm({name:pr.name,emoji:pr.emoji,color:pr.color}); setModal("personForm"); };
+  const savePersonEdit=async()=>{ if(!personForm.name) return; const u=people.map(p=>p.id===editingPerson?{...p,name:personForm.name,emoji:personForm.emoji,color:personForm.color}:p); setPeople(u); await dbSave(KEYS.people,u); await saveToFirestore({people:JSON.stringify(u)}); doFlash(); setPersonForm(emptyPerson); setEditingPerson(null); setModal("terceros"); };
+
   const addTxn=async()=>{
     if(!txnForm.amount||!txnForm.accountId) return;
     if(txnForm.frequency==="monthly"){
@@ -538,18 +587,18 @@ export default function App() {
   // Mantiene la configuración (tipo de cambio y fechas de tarjeta).
   const resetAll=async()=>{
     setTxns([]); setBills([]); setPaid([]); setCardResumen([]); setSavings([]);
-    setAccounts(DEFAULT_ACCOUNTS); setBudget(0);
+    setAccounts(DEFAULT_ACCOUNTS); setBudget(0); setPeople([]);
     setCatsGasto(DEFAULT_CATS_GASTO); setCatsIngreso(DEFAULT_CATS_INGRESO);
-    setAccountDetail(null); setTab("home");
+    setAccountDetail(null); setTerceroDetail(null); setTab("home");
     await Promise.all([
       dbSave(KEYS.txns,[]), dbSave(KEYS.bills,[]), dbSave(KEYS.paid,[]),
-      dbSave(KEYS.cardResumen,[]), dbSave(KEYS.savings,[]),
+      dbSave(KEYS.cardResumen,[]), dbSave(KEYS.savings,[]), dbSave(KEYS.people,[]),
       dbSave(KEYS.accounts,DEFAULT_ACCOUNTS), dbSave(KEYS.budget,0),
       dbSave(KEYS.catsGasto,DEFAULT_CATS_GASTO), dbSave(KEYS.catsIngreso,DEFAULT_CATS_INGRESO),
     ]);
     await saveToFirestore({
       txns:JSON.stringify([]), bills:JSON.stringify([]), paid:JSON.stringify([]),
-      cardResumen:JSON.stringify([]), savings:JSON.stringify([]),
+      cardResumen:JSON.stringify([]), savings:JSON.stringify([]), people:JSON.stringify([]),
       accounts:JSON.stringify(DEFAULT_ACCOUNTS), budget:JSON.stringify(0),
       catsGasto:JSON.stringify(DEFAULT_CATS_GASTO), catsIngreso:JSON.stringify(DEFAULT_CATS_INGRESO),
     });
@@ -606,9 +655,10 @@ export default function App() {
     return <span style={{background:bg,border:`1px solid ${color}55`,borderRadius:6,padding:"2px 8px",color,fontSize:10}}>{label}</span>;
   };
 
-  const AccPills=({selected,onSelect,showNone=false,exclude=[]})=>(
+  const AccPills=({selected,onSelect,showNone=false,exclude=[],includePeople=false})=>(
     <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:14}}>
       {accounts.filter(a=>!exclude.includes(a.id)).map(a=><button key={a.id} onClick={()=>onSelect(a.id)} style={{padding:"7px 11px",borderRadius:10,border:`1px solid ${selected===a.id?a.color:"rgba(255,255,255,0.08)"}`,background:selected===a.id?`${a.color}22`:"rgba(255,255,255,0.02)",color:selected===a.id?a.color:"#666",fontSize:12,cursor:"pointer",fontFamily:"Georgia"}}>{a.emoji} {a.name}</button>)}
+      {includePeople&&people.filter(p=>!exclude.includes(p.id)).map(p=><button key={p.id} onClick={()=>onSelect(p.id)} style={{padding:"7px 11px",borderRadius:10,border:`1px solid ${selected===p.id?p.color:"rgba(232,122,206,0.2)"}`,background:selected===p.id?`${p.color}22`:"rgba(232,122,206,0.05)",color:selected===p.id?p.color:"#9A6080",fontSize:12,cursor:"pointer",fontFamily:"Georgia"}}>{p.emoji} {p.name}</button>)}
       {showNone&&<button onClick={()=>onSelect("none")} style={{padding:"7px 11px",borderRadius:10,border:`1px solid ${selected==="none"?"#888":"rgba(255,255,255,0.08)"}`,background:selected==="none"?"rgba(128,128,128,0.12)":"rgba(255,255,255,0.02)",color:selected==="none"?"#AAA":"#555",fontSize:12,cursor:"pointer",fontFamily:"Georgia"}}>Sin registrar</button>}
     </div>
   );
@@ -695,10 +745,12 @@ export default function App() {
   const TxnModalBody=({onSave,saveLabel,isEdit=false})=>(
     <div style={{padding:"28px 20px"}}>
       <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>{isEdit?"Editar movimiento":"Nuevo movimiento"}</div></div>
-      <div style={S.tRow}>
+      <div style={isEdit?S.tRow:S.tRow3}>
         <button style={S.tBtn(addType==="gasto","#E87A5A")} onClick={()=>setAddType("gasto")}>💸 Gasto</button>
         <button style={S.tBtn(addType==="ingreso",C.green)} onClick={()=>setAddType("ingreso")}>💰 Ingreso</button>
+        {!isEdit&&<button style={S.tBtn(addType==="transfer",C.blue)} onClick={()=>setAddType("transfer")}>🔄 Transacción</button>}
       </div>
+      {addType==="transfer"&&<div style={{background:"rgba(90,155,232,0.08)",border:"1px solid rgba(90,155,232,0.2)",borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.blue}}>🔄 Mové plata de una cuenta a otra. Podés usar tus cuentas o las de terceros (prestar, devolver, o que te depositen).</div>}
       {!isEdit&&addType==="gasto"&&<>
         <label style={S.lbl}>Frecuencia</label>
         <div style={S.tRow3}>
@@ -727,10 +779,19 @@ export default function App() {
       <input style={{...S.inp,fontSize:26,textAlign:"center",marginBottom:6}} type="number" placeholder="$ 0" value={txnForm.amount} onChange={e=>setTxnForm(f=>({...f,amount:e.target.value}))}/>
       {txnForm.currency==="USD"&&txnForm.amount&&<div style={{fontSize:12,color:C.blue,textAlign:"center",marginBottom:12}}>≈ {fmt(parseFloat(txnForm.amount||0)*usdRate)}</div>}
       {txnForm.currency==="ARS"&&<div style={{height:8}}/>}
+      {addType!=="transfer"?<>
       <label style={S.lbl}>Cuenta</label>
-      <AccPills selected={txnForm.accountId} onSelect={id=>setTxnForm(f=>({...f,accountId:id}))}/>
+      <AccPills selected={txnForm.accountId} onSelect={id=>setTxnForm(f=>({...f,accountId:id}))} includePeople={addType==="gasto"&&txnForm.frequency==="once"}/>
+      {addType==="gasto"&&txnForm.frequency==="once"&&isPersonId(txnForm.accountId)&&<div style={{fontSize:12,color:C.pink,marginTop:-6,marginBottom:12,lineHeight:1.6}}>💡 Lo pagó {entityOf(txnForm.accountId)?.name}. Queda registrado como gasto y como deuda con esa persona; no te baja el balance real hasta que se lo devuelvas.</div>}
       {addType==="gasto"&&<><label style={S.lbl}>Categoría</label><div style={S.cGrid}>{catsGasto.map(c=><button key={c.name} style={S.cBtn(txnForm.category===c.name,c.color)} onClick={()=>setTxnForm(f=>({...f,category:c.name}))}><span style={{fontSize:20}}>{c.emoji}</span><span style={{fontSize:9,color:txnForm.category===c.name?c.color:"#555"}}>{c.name}</span></button>)}</div></>}
       {addType==="ingreso"&&<><label style={S.lbl}>Categoría</label><div style={S.cGrid}>{catsIngreso.map(c=><button key={c.name} style={S.cBtn(txnForm.category===c.name,c.color)} onClick={()=>setTxnForm(f=>({...f,category:c.name}))}><span style={{fontSize:20}}>{c.emoji}</span><span style={{fontSize:9,color:txnForm.category===c.name?c.color:"#555"}}>{c.name}</span></button>)}</div></>}
+      </>:<>
+      <label style={S.lbl}>Desde (de dónde sale)</label>
+      <AccPills selected={txnForm.fromId} onSelect={id=>setTxnForm(f=>({...f,fromId:id}))} includePeople={true} exclude={txnForm.toId?[txnForm.toId]:[]}/>
+      <label style={S.lbl}>Hacia (a dónde entra)</label>
+      <AccPills selected={txnForm.toId} onSelect={id=>setTxnForm(f=>({...f,toId:id}))} includePeople={true} exclude={txnForm.fromId?[txnForm.fromId]:[]}/>
+      {txnForm.fromId&&txnForm.toId&&<div style={{fontSize:12,color:"#888",marginTop:-4,marginBottom:12,lineHeight:1.6}}>{entityOf(txnForm.fromId)?.name} → {entityOf(txnForm.toId)?.name}{isPersonId(txnForm.fromId)&&!isPersonId(txnForm.toId)&&` · ${entityOf(txnForm.fromId)?.name} pone plata en ${entityOf(txnForm.toId)?.name} (le vas a deber)`}{!isPersonId(txnForm.fromId)&&isPersonId(txnForm.toId)&&` · le pasás plata a ${entityOf(txnForm.toId)?.name} (le devolvés o le prestás)`}</div>}
+      </>}
       <label style={S.lbl}>{txnForm.frequency==="monthly"?"Descripción (nombre)":"Descripción"}</label>
       <input style={{...S.inp,marginBottom:12}} type="text" placeholder={txnForm.frequency==="monthly"?"ej: Spotify":"ej: almuerzo"} value={txnForm.description} onChange={e=>setTxnForm(f=>({...f,description:e.target.value}))}/>
       <label style={S.lbl}>{txnForm.frequency==="monthly"?"Día del mes":"Fecha"}</label>
@@ -738,7 +799,7 @@ export default function App() {
         ? <input style={{...S.inp,marginBottom:20}} type="number" min="1" max="31" placeholder="ej: 15" value={txnForm.date} onChange={e=>setTxnForm(f=>({...f,date:e.target.value}))}/>
         : <input style={{...S.inp,marginBottom:20}} type="date" value={txnForm.date||todayStr()} onChange={e=>setTxnForm(f=>({...f,date:e.target.value}))}/>
       }
-      <button style={S.sub()} onClick={onSave}>{flash?"✅ Guardado":saveLabel}</button>
+      <button style={S.sub()} onClick={()=>(!isEdit&&addType==="transfer")?addTransfer():onSave()}>{flash?"✅ Guardado":saveLabel}</button>
     </div>
   );
 
@@ -873,6 +934,68 @@ export default function App() {
       <button style={{width:"100%",padding:14,borderRadius:13,background:"transparent",border:"1px solid rgba(255,255,255,0.12)",color:"#888",fontSize:14,cursor:"pointer",fontFamily:"Georgia,serif"}} onClick={closeModal}>Cancelar</button>
     </div></div>
   );
+
+  // 🆕 MODAL: alta/edición de persona (cuenta de tercero)
+  if(modal==="personForm") return(
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
+      <div style={{...S.row,marginBottom:22}}><button onClick={()=>{setPersonForm(emptyPerson);setEditingPerson(null);setModal("terceros");}} style={S.back}>←</button><div style={S.ey}>{editingPerson?"Editar persona":"Nueva persona"}</div></div>
+      <label style={S.lbl}>Nombre</label>
+      <input style={{...S.inp,marginBottom:14}} type="text" placeholder="ej: Juan, Mamá…" value={personForm.name} onChange={e=>setPersonForm(f=>({...f,name:e.target.value}))}/>
+      <label style={S.lbl}>Ícono</label>
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:14}}>{["🧑","👩","👨","👵","👴","🧔","👧","👦","💁","🧑‍🤝‍🧑","🤝","🏦"].map(e=><button key={e} onClick={()=>setPersonForm(f=>({...f,emoji:e}))} style={{width:40,height:40,borderRadius:10,border:`1px solid ${personForm.emoji===e?C.gold:"rgba(255,255,255,0.08)"}`,background:personForm.emoji===e?"rgba(200,169,126,0.15)":"rgba(255,255,255,0.03)",fontSize:22,cursor:"pointer"}}>{e}</button>)}</div>
+      <label style={S.lbl}>Color</label>
+      <div style={{display:"flex",gap:10,marginBottom:24,flexWrap:"wrap"}}>{ACC_COLORS.map(c=><button key={c} onClick={()=>setPersonForm(f=>({...f,color:c}))} style={{width:32,height:32,borderRadius:"50%",background:c,border:personForm.color===c?"3px solid white":"3px solid transparent",cursor:"pointer"}}/>)}</div>
+      {!editingPerson&&<>
+        <label style={S.lbl}>Saldo inicial (opcional)</label>
+        <div style={{...S.tRow,marginBottom:10}}>
+          <button style={S.tBtn(personForm.saldoTipo==="teDebe",C.green)} onClick={()=>setPersonForm(f=>({...f,saldoTipo:"teDebe"}))}>Me debe</button>
+          <button style={S.tBtn(personForm.saldoTipo==="leDebes",C.red)} onClick={()=>setPersonForm(f=>({...f,saldoTipo:"leDebes"}))}>Le debo</button>
+        </div>
+        <input style={{...S.inp,marginBottom:24}} type="number" placeholder="$ 0 (dejá vacío si arranca en cero)" value={personForm.saldo} onChange={e=>setPersonForm(f=>({...f,saldo:e.target.value}))}/>
+      </>}
+      <button style={S.sub()} onClick={()=>editingPerson?savePersonEdit():addPerson()}>{flash?"✅ Guardado":editingPerson?"Guardar cambios":"Crear persona"}</button>
+    </div></div>
+  );
+
+  // 🆕 MODAL: cuentas de terceros (lista o detalle de una persona)
+  if(modal==="terceros") return(
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:560,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
+      {!terceroDetail?<>
+        <div style={{...S.row,marginBottom:18}}><button onClick={closeModal} style={S.back}>←</button><div><div style={S.ey}>Cuentas de terceros</div><div style={{fontSize:18}}>Préstamos con personas</div></div></div>
+        {!tercerosSeen&&<div style={{background:"rgba(90,155,232,0.07)",border:"1px solid rgba(90,155,232,0.25)",borderRadius:14,padding:16,marginBottom:18,fontSize:13,color:"#A9C4E8",lineHeight:1.8}}>
+          <div style={{fontSize:13,color:C.blue,marginBottom:6}}>👋 ¿Cómo funciona?</div>
+          Es una libretita de quién le debe a quién, aparte de tus cuentas. Creás una persona y cada préstamo queda registrado. <strong style={{color:C.green}}>Verde = te debe</strong>, <strong style={{color:C.red}}>rojo = le debés</strong>.<br/><br/>
+          Para mover plata usá <strong>Nuevo movimiento → Transacción</strong>: por ejemplo "Sueldo → Juan" si le devolvés, o "Juan → Sueldo" si te deposita. Y si alguien te financia un gasto, cargás un <strong>Gasto</strong> y elegís a esa persona como cuenta. Eso no te baja el balance real hasta que se lo devolvés.
+          <button onClick={markTercerosSeen} style={{display:"block",marginTop:14,padding:"9px 16px",borderRadius:10,background:"rgba(90,155,232,0.15)",border:"1px solid rgba(90,155,232,0.3)",color:C.blue,fontSize:13,cursor:"pointer",fontFamily:"Georgia,serif"}}>Entendido</button>
+        </div>}
+        {people.length===0?<div style={{textAlign:"center",padding:"24px",color:"#444",fontSize:13}}>Todavía no agregaste a nadie.</div>
+          :people.map(pr=>{const bal=accountBalance(pr.id);const teDebe=bal>0;return(
+            <div key={pr.id} style={{...S.card(),margin:"0 0 10px",cursor:"pointer"}} onClick={()=>setTerceroDetail(pr.id)}>
+              <div style={{...S.row}}>
+                <div style={S.eBox(`${pr.color}22`)}>{pr.emoji}</div>
+                <div style={{flex:1}}><div style={{fontSize:15}}>{pr.name}</div><div style={{fontSize:11,color:bal===0?"#666":teDebe?C.green:C.red,marginTop:2}}>{bal===0?"Al día":teDebe?"Te debe":"Le debés"}</div></div>
+                <div style={{fontSize:18,fontFamily:"Georgia",color:bal===0?"#888":teDebe?C.green:C.red}}>{bal<0?"−":""}{fmt(Math.abs(bal))}</div>
+                <button onClick={(e)=>{e.stopPropagation();startEditPerson(pr);}} style={S.penBtn}>✏️</button>
+                <button onClick={(e)=>{e.stopPropagation();delPerson(pr.id);}} style={S.xBtn}>×</button>
+              </div>
+            </div>
+          );})}
+        <button onClick={()=>{setPersonForm(emptyPerson);setEditingPerson(null);setModal("personForm");}} style={{width:"100%",padding:12,borderRadius:12,background:"rgba(90,155,232,0.08)",border:"1px solid rgba(90,155,232,0.25)",color:C.blue,fontSize:13,cursor:"pointer",fontFamily:"Georgia",marginTop:8,marginBottom:40}}>+ Nueva persona</button>
+      </>:(()=>{
+        const pr=people.find(p=>p.id===terceroDetail); if(!pr){ setTerceroDetail(null); return null; }
+        const bal=accountBalance(pr.id); const teDebe=bal>0; const movs=entityMovements(pr.id);
+        return(<>
+          <div style={{...S.row,marginBottom:14}}><button onClick={()=>setTerceroDetail(null)} style={S.back}>←</button><div style={{flex:1}}><div style={S.ey}>{pr.emoji} {pr.name}</div><div style={{fontSize:22,fontFamily:"Georgia",color:bal===0?"#888":teDebe?C.green:C.red}}>{bal<0?"−":""}{fmt(Math.abs(bal))}</div><div style={{fontSize:11,color:bal===0?"#666":teDebe?C.green:C.red}}>{bal===0?"Al día":teDebe?"Te debe":"Le debés"}</div></div></div>
+          <button onClick={()=>{setAddType("transfer");setTxnForm({...emptyTxn,toId:pr.id});setModal("txn");}} style={{width:"100%",padding:11,borderRadius:11,background:"rgba(90,232,154,0.08)",border:"1px solid rgba(90,232,154,0.25)",color:C.green,fontSize:13,cursor:"pointer",fontFamily:"Georgia",marginBottom:8}}>↗ Le presté / le devolví (sale de una cuenta mía)</button>
+          <button onClick={()=>{setAddType("transfer");setTxnForm({...emptyTxn,fromId:pr.id});setModal("txn");}} style={{width:"100%",padding:11,borderRadius:11,background:"rgba(232,90,90,0.08)",border:"1px solid rgba(232,90,90,0.25)",color:C.red,fontSize:13,cursor:"pointer",fontFamily:"Georgia",marginBottom:16}}>↙ Me prestó / me devolvió (entra a una cuenta mía)</button>
+          <div style={S.sec}>Movimientos</div>
+          {movs.length===0?<div style={{textAlign:"center",padding:"20px",color:"#444",fontSize:13}}>Sin movimientos todavía.</div>
+            :<div style={{marginBottom:40}}>{movs.map(({t,dir,label})=>(<div key={t.id} style={S.txRow}><div style={S.eBox(dir>0?"rgba(90,232,154,0.12)":"rgba(232,90,90,0.12)")}>{dir>0?"↘":"↗"}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}>{label}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>{fmtDate(t.date)} · {dir>0?"te debe más / o le devolviste":"le debés más / o te devolvió"}</div></div><div style={{fontSize:15,fontFamily:"Georgia",color:dir>0?C.green:C.red}}>{dir>0?"+":"−"}{fmt(toARS(t))}</div><button onClick={()=>delTxn(t.id)} style={S.xBtn}>×</button></div>))}</div>}
+        </>);
+      })()}
+    </div></div>
+  );
+
   if(accountDetail){
     const acc=accounts.find(a=>a.id===accountDetail);
     if(!acc){ setAccountDetail(null); return null; }
@@ -887,9 +1010,9 @@ export default function App() {
         </div>
         {isTarjeta&&(<div style={S.pinkC}><div style={{fontSize:11,color:C.pink,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>Resumen {MONTHS_FULL[PM]}</div><div style={{fontSize:22,color:C.pink,fontFamily:"Georgia"}}>{prevResumenPaid?<span style={{color:C.green}}>✓ Pagado</span>:fmt(prevResumenAmount)}</div>{!prevResumenPaid&&<div style={{fontSize:11,color:"#7A4060",marginTop:4}}>Vence el {cardSettings.dueDay} de {MONTHS_FULL[CM]}</div>}<div style={{fontSize:11,color:"#666",marginTop:8}}>Acumulando {MONTHS_FULL[CM]}: {fmt(currAccumulating)}</div></div>)}
         <div style={S.sec}>Historial de movimientos</div>
-        {accTxns.length===0?<div style={{textAlign:"center",padding:"30px",color:"#444",fontSize:13}}>Sin movimientos registrados.</div>
-          :<div style={{padding:"0 20px",marginBottom:80}}>{accTxns.map(t=>{const cats=t.type==="gasto"?catsGasto:catsIngreso;const cat=cats.find(c=>c.name===t.category)||{emoji:"•",color:"#888"};return(<div key={t.id} style={S.txRow}><div style={S.eBox(`${cat.color}18`)}>{cat.emoji}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}>{t.description||t.category}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>{t.category} · {fmtDate(t.date)}{t.currency==="USD"&&<span style={{color:C.blue}}> · 🇺🇸</span>}</div></div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:15,fontFamily:"Georgia",color:t.type==="gasto"?C.red:C.green}}>{t.type==="gasto"?"−":"+"}{t.currency==="USD"?fmtUSD(t.amount):fmt(t.amount)}</div>{t.currency==="USD"&&<div style={{fontSize:10,color:"#444"}}>≈{fmt(t.amount*usdRate)}</div>}</div><button onClick={()=>startEditTxn(t)} style={S.penBtn}>✏️</button><button onClick={()=>delTxn(t.id)} style={S.xBtn}>×</button></div>);})}
-          </div>}
+        {(()=>{const movs=entityMovements(accountDetail);return movs.length===0?<div style={{textAlign:"center",padding:"30px",color:"#444",fontSize:13}}>Sin movimientos registrados.</div>
+          :<div style={{padding:"0 20px",marginBottom:80}}>{movs.map(({t,dir,label})=>{const isT=t.type==="transfer";const cat=isT?{emoji:dir>0?"↘":"↗",color:dir>0?C.green:C.red}:(t.type==="gasto"?catsGasto:catsIngreso).find(c=>c.name===t.category)||{emoji:"•",color:"#888"};return(<div key={t.id} style={S.txRow}><div style={S.eBox(`${cat.color}18`)}>{cat.emoji}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}>{label}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>{isT?"Transferencia":t.category} · {fmtDate(t.date)}{t.currency==="USD"&&<span style={{color:C.blue}}> · 🇺🇸</span>}</div></div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:15,fontFamily:"Georgia",color:dir>0?C.green:C.red}}>{dir>0?"+":"−"}{t.currency==="USD"?fmtUSD(t.amount):fmt(t.amount)}</div>{t.currency==="USD"&&<div style={{fontSize:10,color:"#444"}}>≈{fmt(t.amount*usdRate)}</div>}</div>{!isT&&<button onClick={()=>startEditTxn(t)} style={S.penBtn}>✏️</button>}<button onClick={()=>delTxn(t.id)} style={S.xBtn}>×</button></div>);})}
+          </div>;})()}
         <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>{setAccountDetail(null);setTab(t);}}><span>{e}</span>{l}</button>)}</div>
       </div>
     );
@@ -1035,6 +1158,7 @@ export default function App() {
         [()=>setModal("cats"),"rgba(160,124,254,0.07)","rgba(160,124,254,0.25)",C.purple,"🏷️ Configurar categorías"],
         [()=>{setTempRate(String(usdRate));setModal("usd");},"rgba(90,155,232,0.07)","rgba(90,155,232,0.2)",C.blue,`🇺🇸 TC dólar: $${usdRate.toLocaleString("es-AR")}/US$`],
         [()=>{setTempBudget(String(budget));setModal("budget");},"rgba(90,232,154,0.07)","rgba(90,232,154,0.2)",C.green,`🎯 Presupuesto: ${budget>0?fmt(budget):"No configurado"}`],
+        [()=>{setTerceroDetail(null);setModal("terceros");},"rgba(232,122,206,0.05)","rgba(232,122,206,0.2)",C.pink,`👥 Cuentas de terceros${people.length>0?` (${people.length})`:""}`],
       ].map(([fn,bg,border,col,label],i)=>(<div key={i} style={{margin:"6px 14px"}}><button onClick={fn} style={{width:"100%",padding:12,borderRadius:12,background:bg,border:`1px solid ${border}`,color:col,fontSize:13,cursor:"pointer",fontFamily:"Georgia"}}>{label}</button></div>))}
       {/* 🆕 GATILLO OCULTO DE REINICIO — tocá 7 veces "v6.0" para abrir la zona de peligro */}
       <div style={{textAlign:"center",padding:"30px 0 90px"}}>
@@ -1114,7 +1238,7 @@ export default function App() {
       {accounts.some(a=>accountBalance(a.id)!==0)&&<><div style={S.sec}>Mis cuentas</div><div style={{display:"flex",gap:10,padding:"0 14px",overflowX:"auto",paddingBottom:6}}>{accounts.map(acc=>{const b=accountBalance(acc.id);const neg=b<0;return(<div key={acc.id} onClick={()=>setAccountDetail(acc.id)} style={{flexShrink:0,background:neg?"rgba(232,90,90,0.08)":"rgba(255,255,255,0.04)",border:`1px solid ${neg?"rgba(232,90,90,0.3)":acc.color+"33"}`,borderRadius:14,padding:"14px 16px",cursor:"pointer",minWidth:110}}><div style={{fontSize:18,marginBottom:4}}>{acc.emoji}</div><div style={{fontSize:11,color:"#666",marginBottom:4}}>{acc.name}</div><div style={{fontSize:16,fontFamily:"Georgia",color:neg?C.red:acc.color}}>{neg&&"−"}{fmt(Math.abs(b))}</div></div>);})}</div></>}
       <div style={S.card()}><div style={S.row}><span style={{fontSize:20}}>📋</span><div style={{flex:1}}><div style={{fontSize:11,color:"#888",marginBottom:2}}>Total gasto fijo mensual</div><div style={{fontSize:20,fontFamily:"Georgia",color:C.gold}}>{fmt(monthlyFixedTotal)}</div></div><button onClick={()=>setTab("insights")} style={{background:"none",border:"1px solid rgba(200,169,126,0.2)",borderRadius:8,padding:"6px 12px",color:C.gold,fontSize:11,cursor:"pointer"}}>Ver →</button></div></div>
       {/* 🆕 ÚLTIMOS MOVIMIENTOS — todos los gastos/ingresos de una vez, editables y borrables */}
-      {txns.length>0&&<><div style={S.sec}>Últimos movimientos</div><div style={{padding:"0 14px"}}>{recentTxns.map(t=>{const cats=t.type==="gasto"?catsGasto:catsIngreso;const cat=cats.find(c=>c.name===t.category)||{emoji:"•",color:"#888"};const acc=accounts.find(a=>a.id===t.accountId);return(<div key={t.id} style={S.txRow}><div style={S.eBox(`${cat.color}18`)}>{cat.emoji}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}>{t.description||t.category}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>{acc?`${acc.emoji} ${acc.name}`:t.category} · {fmtDate(t.date)}{t.currency==="USD"&&<span style={{color:C.blue}}> · 🇺🇸</span>}</div></div><div style={{fontSize:15,fontFamily:"Georgia",color:t.type==="gasto"?C.red:C.green,flexShrink:0}}>{t.type==="gasto"?"−":"+"}{t.currency==="USD"?fmtUSD(t.amount):fmt(t.amount)}</div><button onClick={()=>startEditTxn(t)} style={S.penBtn}>✏️</button><button onClick={()=>delTxn(t.id)} style={S.xBtn}>×</button></div>);})}</div></>}
+      {txns.length>0&&<><div style={S.sec}>Últimos movimientos</div><div style={{padding:"0 14px"}}>{recentTxns.map(t=>{const isT=t.type==="transfer";const cat=isT?{emoji:"🔄",color:C.blue}:(t.type==="gasto"?catsGasto:catsIngreso).find(c=>c.name===t.category)||{emoji:"•",color:"#888"};const acc=entityOf(t.accountId);const fromE=isT?entityOf(t.fromId):null;const toE=isT?entityOf(t.toId):null;return(<div key={t.id} style={S.txRow}><div style={S.eBox(`${cat.color}18`)}>{cat.emoji}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}>{isT?(t.description||`${fromE?fromE.name:"?"} → ${toE?toE.name:"?"}`):(t.description||t.category)}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>{isT?`${fromE?fromE.emoji+" "+fromE.name:"?"} → ${toE?toE.emoji+" "+toE.name:"?"}`:(acc?`${acc.emoji} ${acc.name}`:t.category)} · {fmtDate(t.date)}{t.currency==="USD"&&<span style={{color:C.blue}}> · 🇺🇸</span>}</div></div><div style={{fontSize:15,fontFamily:"Georgia",color:isT?C.blue:(t.type==="gasto"?C.red:C.green),flexShrink:0}}>{isT?"":t.type==="gasto"?"−":"+"}{t.currency==="USD"?fmtUSD(t.amount):fmt(t.amount)}</div>{!isT&&<button onClick={()=>startEditTxn(t)} style={S.penBtn}>✏️</button>}<button onClick={()=>delTxn(t.id)} style={S.xBtn}>×</button></div>);})}</div></>}
       <div style={{height:80}}/>
       <button style={S.fab} onClick={()=>setModal("txn")}>+</button>
       <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
