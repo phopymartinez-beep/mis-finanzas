@@ -227,10 +227,15 @@ export default function App() {
   const resumenDaysLeft=daysUntil(resumenDueDay,CM,CY);
 
   const regularBills=bills.filter(b=>!b.isCard);
-  const regularBillsSorted=[...regularBills].filter(b=>b.installments===null||b.installmentCurrent<=b.installments).sort((a,b2)=>a.dueDay-b2.dueDay);
+  // ✅ FIX: solo muestra bills regulares que ya empezaron (startMonth <= mes actual)
+  const billStartedBy=(b,m,y)=>{
+    if(b.installmentStartMonth===null||b.installmentStartYear===null) return true;
+    return monthOffset(b.installmentStartMonth,b.installmentStartYear,m,y)>=0;
+  };
+  const regularBillsSorted=[...regularBills].filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&billStartedBy(b,CM,CY)).sort((a,b2)=>a.dueDay-b2.dueDay);
   const pendingRegularBills=regularBillsSorted.filter(b=>!isPaid(b.id,CM,CY));
   const pendingTotal=pendingRegularBills.reduce((s,b)=>s+b.amount,0)+(prevResumenPaid?0:prevResumenAmount);
-  const monthlyFixedTotal=bills.filter(b=>{ if(b.isCard) return isCardBillActiveInMonth(b,CM,CY); return b.installments===null||b.installmentCurrent<=b.installments; }).reduce((s,b)=>s+b.amount,0);
+  const monthlyFixedTotal=bills.filter(b=>{ if(b.isCard) return isCardBillActiveInMonth(b,CM,CY); return (b.installments===null||b.installmentCurrent<=b.installments)&&billStartedBy(b,CM,CY); }).reduce((s,b)=>s+b.amount,0);
   const urgentRegular=pendingRegularBills.filter(b=>daysUntil(b.dueDay,CM,CY)<=5).sort((a,b2)=>daysUntil(a.dueDay,CM,CY)-daysUntil(b2.dueDay,CM,CY));
   const resumenIsUrgent=!prevResumenPaid&&resumenDaysLeft<=5&&prevResumenAmount>0;
 
@@ -267,7 +272,8 @@ export default function App() {
       if(!txnForm.description) return;
       const day=parseInt(txnForm.date)||15;
       const isCard=txnForm.accountId==="tarjeta";
-      const b={id:Date.now(),name:txnForm.description,emoji:"📋",amount:parseFloat(txnForm.amount),dueDay:day,isCard,accountId:txnForm.accountId,installments:null,installmentCurrent:null,installmentStartMonth:null,installmentStartYear:null};
+      // ✅ FIX: guardamos el mes actual como punto de inicio para que no aparezca en meses pasados
+      const b={id:Date.now(),name:txnForm.description,emoji:"📋",amount:parseFloat(txnForm.amount),dueDay:day,isCard,accountId:txnForm.accountId,installments:null,installmentCurrent:null,installmentStartMonth:CM,installmentStartYear:CY};
       const u=[...bills,b]; setBills(u); await dbSave(KEYS.bills,u); await saveToFirestore({bills:JSON.stringify(u)});
       doFlash(); closeModal(); return;
     }
@@ -747,8 +753,10 @@ export default function App() {
         </div>
         <div style={S.sec}>📋 Gastos fijos mensuales — por fecha de vencimiento</div>
         <div style={{padding:"0 14px",marginBottom:80}}>
-          {regularBillsSorted.length===0?<div style={{textAlign:"center",padding:"24px",color:"#444",fontSize:13}}>Sin gastos fijos. Tocá + para agregar.</div>
-          :regularBillsSorted.map(b=>{
+          {/* ✅ FIX: filtramos por el mes que se está viendo, no solo el actual */}
+          {regularBills.filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&billStartedBy(b,viewM,viewY)).sort((a,b2)=>a.dueDay-b2.dueDay).length===0
+            ?<div style={{textAlign:"center",padding:"24px",color:"#444",fontSize:13}}>Sin gastos fijos. Tocá + para agregar.</div>
+          :regularBills.filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&billStartedBy(b,viewM,viewY)).sort((a,b2)=>a.dueDay-b2.dueDay).map(b=>{
             const done=isPaid(b.id,viewM,viewY);
             const selecting=payWith.billId===b.id&&viewCurr;
             return(
