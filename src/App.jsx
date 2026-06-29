@@ -138,6 +138,7 @@ export default function App() {
   const [flash,setFlash]=useState(false);
   const [payWith,setPayWith]=useState({billId:null,accountId:""});
   const [resumenPayAcc,setResumenPayAcc]=useState("");
+  const [resumenPayTarget,setResumenPayTarget]=useState(null); // 🆕 qué resumen se está pagando (mes en curso o adelantado)
   const [editingTxn,setEditingTxn]=useState(null);
   const [editingBill,setEditingBill]=useState(null);
   const [editingAcc,setEditingAcc]=useState(null);
@@ -189,7 +190,7 @@ export default function App() {
   const closeModal=()=>{
     setModal(null); setEditingTxn(null); setEditingBill(null); setEditingAcc(null); setEditingCat(null);
     setTxnForm(emptyTxn); setBillForm(emptyBill); setAccForm(emptyAcc); setSavForm(emptySav); setCatForm(emptyCat);
-    setPayWith({billId:null,accountId:""}); setResumenPayAcc("");
+    setPayWith({billId:null,accountId:""}); setResumenPayAcc(""); setResumenPayTarget(null);
     setTempRate(""); setTempBudget(""); setTempCard({closingDay:"",dueDay:""});
     setAddSavId(null); setAddSavAmt(""); setDelTarget(null);
   };
@@ -487,11 +488,11 @@ export default function App() {
   };
 
   // ── Pay card resumen ───────────────────────────────────────────────────────
-  const payCardResumen=async(fromAccountId,rKey,rAmount)=>{
+  const payCardResumen=async(fromAccountId,rKey,rAmount,labelM)=>{
     const u=[...cardResumen,rKey]; setCardResumen(u); await dbSave(KEYS.cardResumen,u);
     await saveToFirestore({cardResumen:JSON.stringify(u)}); // ✅ FIX sincroniza cardResumen
     if(fromAccountId&&fromAccountId!=="none"){
-      const txn={id:Date.now(),type:"gasto",amount:rAmount,category:"Finanzas",description:`Resumen Tarjeta ${MONTHS_FULL[PM]}`,date:todayStr(),accountId:fromAccountId,currency:"ARS",_cardResumenKey:rKey};
+      const txn={id:Date.now(),type:"gasto",amount:rAmount,category:"Finanzas",description:`Resumen Tarjeta ${MONTHS_FULL[labelM!==undefined?labelM:PM]}`,date:todayStr(),accountId:fromAccountId,currency:"ARS",_cardResumenKey:rKey};
       const tu=[txn,...txns]; setTxns(tu); await dbSave(KEYS.txns,tu); await saveToFirestore({txns:JSON.stringify(tu)});
     }
     doFlash(); setResumenPayAcc(""); setModal(null);
@@ -818,20 +819,20 @@ export default function App() {
     </div></div>
   );
 
-  if(modal==="payResumenModal") return(
+  if(modal==="payResumenModal"&&resumenPayTarget) return(
     <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
-      <div style={{...S.row,marginBottom:22}}><button onClick={()=>setModal(null)} style={S.back}>←</button><div><div style={S.ey}>Pagar resumen</div><div style={{fontSize:18}}>Tarjeta {MONTHS_FULL[PM]}</div></div></div>
+      <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div><div style={S.ey}>Pagar resumen</div><div style={{fontSize:18}}>Tarjeta {MONTHS_FULL[resumenPayTarget.m]}</div></div></div>
       <div style={{background:"rgba(232,122,206,0.08)",border:"1px solid rgba(232,122,206,0.25)",borderRadius:16,padding:20,marginBottom:14,textAlign:"center"}}>
         <div style={{fontSize:11,color:C.pink,letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>Total a pagar</div>
-        <div style={{fontSize:34,fontFamily:"Georgia",color:C.pink,marginBottom:4}}>{fmt(prevResumenAmount)}</div>
+        <div style={{fontSize:34,fontFamily:"Georgia",color:C.pink,marginBottom:4}}>{fmt(resumenPayTarget.amount)}</div>
       </div>
       <div style={{...S.card(),marginBottom:14,maxHeight:150,overflowY:"auto"}}>
-        {cardRowsForResumen(PM,PY).map(({bill:b,n},i)=><div key={`${b.id}-${n}-${i}`} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>{b.emoji}</span><span style={{flex:1,fontSize:13}}>{b.name}{n!==null&&<span style={{fontSize:10,color:"#888",marginLeft:6}}>C{n}/{b.installments}</span>}</span><span style={{fontSize:13,fontFamily:"Georgia",color:C.pink}}>{fmt(b.amount)}</span></div>)}
-        {cardTxnsForResumen(PM,PY).map(t=><div key={t.id} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>🛒</span><span style={{flex:1,fontSize:13}}>{t.description||t.category}</span><span style={{fontSize:13,fontFamily:"Georgia",color:C.pink}}>{fmt(toARS(t))}</span></div>)}
+        {cardRowsForResumen(resumenPayTarget.m,resumenPayTarget.y).map(({bill:b,n},i)=><div key={`${b.id}-${n}-${i}`} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>{b.emoji}</span><span style={{flex:1,fontSize:13}}>{b.name}{n!==null&&<span style={{fontSize:10,color:"#888",marginLeft:6}}>C{n}/{b.installments}</span>}</span><span style={{fontSize:13,fontFamily:"Georgia",color:C.pink}}>{fmt(b.amount)}</span></div>)}
+        {cardTxnsForResumen(resumenPayTarget.m,resumenPayTarget.y).map(t=><div key={t.id} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>🛒</span><span style={{flex:1,fontSize:13}}>{t.description||t.category}</span><span style={{fontSize:13,fontFamily:"Georgia",color:C.pink}}>{fmt(toARS(t))}</span></div>)}
       </div>
       <label style={S.lbl}>¿Con qué cuenta pagás?</label>
       <AccPills selected={resumenPayAcc} onSelect={setResumenPayAcc} showNone={true} exclude={["tarjeta"]}/>
-      <button disabled={!resumenPayAcc} style={{...S.sub(resumenPayAcc?C.pink:"#333"),color:resumenPayAcc?C.bg:"#555"}} onClick={()=>payCardResumen(resumenPayAcc,prevResumenKey_,prevResumenAmount)}>{flash?"✅ Pagado":"Confirmar pago"}</button>
+      <button disabled={!resumenPayAcc} style={{...S.sub(resumenPayAcc?C.pink:"#333"),color:resumenPayAcc?C.bg:"#555"}} onClick={()=>payCardResumen(resumenPayAcc,resumenPayTarget.key,resumenPayTarget.amount,resumenPayTarget.m)}>{flash?"✅ Pagado":"Confirmar pago"}</button>
     </div></div>
   );
 
@@ -927,7 +928,7 @@ export default function App() {
           <div style={{background:rPaid?"rgba(90,232,154,0.04)":"rgba(232,122,206,0.06)",border:`1px solid ${rPaid?"rgba(90,232,154,0.2)":"rgba(232,122,206,0.25)"}`,borderRadius:16,overflow:"hidden"}}>
             <div style={{...S.row,padding:"14px 16px",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
               {/* ✅ FIX al desmarcar resumen también llama saveToFirestore */}
-              <button style={S.chk(rPaid)} onClick={()=>{ if(!rPaid){setResumenPayAcc("");setModal("payResumenModal");}else{const u=cardResumen.filter(k=>k!==rKey);setCardResumen(u);dbSave(KEYS.cardResumen,u);saveToFirestore({cardResumen:JSON.stringify(u)});} }}>{rPaid?"✓":""}</button>
+              <button style={S.chk(rPaid)} onClick={()=>{ if(!rPaid){setResumenPayAcc("");setResumenPayTarget({key:rKey,amount:rAmount,m:viewCurr?PM:CM,y:viewCurr?PY:CY});setModal("payResumenModal");}else{const u=cardResumen.filter(k=>k!==rKey);setCardResumen(u);dbSave(KEYS.cardResumen,u);saveToFirestore({cardResumen:JSON.stringify(u)});} }}>{rPaid?"✓":""}</button>
               <div style={S.eBox("rgba(232,122,206,0.15)")}>💳</div>
               <div style={{flex:1}}><div style={{fontSize:15,color:rPaid?"#888":"#EDE9E3",textDecoration:rPaid?"line-through":"none"}}>Resumen Tarjeta {rMonthLabel}</div><div style={{fontSize:11,color:C.pink,marginTop:3}}>{rPaid?"✓ Pagado":`Vence el ${rDueDay} de ${MONTHS_FULL[viewM]} · ${rDaysLeft<0?`Venció hace ${Math.abs(rDaysLeft)}d`:rDaysLeft===0?"¡HOY!":rDaysLeft===1?"Mañana":`${rDaysLeft}d`}`}</div></div>
               <div style={{fontSize:18,fontFamily:"Georgia",color:rPaid?C.green:C.pink,flexShrink:0}}>{fmt(rAmount)}</div>
@@ -947,11 +948,11 @@ export default function App() {
             ?<div style={{textAlign:"center",padding:"24px",color:"#444",fontSize:13}}>Sin gastos fijos. Tocá + para agregar.</div>
           :regularBills.filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&recurringActive(b,viewM,viewY)).sort((a,b2)=>a.dueDay-b2.dueDay).map(b=>{
             const done=isPaid(b.id,viewM,viewY);
-            const selecting=payWith.billId===b.id&&viewCurr;
+            const selecting=payWith.billId===b.id;
             return(
               <div key={b.id} style={{borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 4px",opacity:done?0.4:1}}>
-                  <button style={S.chk(done)} onClick={()=>{ if(!viewCurr)return; if(done){togglePaid(b.id,null,viewM,viewY);}else{setPayWith(p=>p.billId===b.id?{billId:null,accountId:""}:{billId:b.id,accountId:""});} }}>{done?"✓":""}</button>
+                  <button style={S.chk(done)} onClick={()=>{ if(done){togglePaid(b.id,null,viewM,viewY);}else{setPayWith(p=>p.billId===b.id?{billId:null,accountId:""}:{billId:b.id,accountId:""});} }}>{done?"✓":""}</button>
                   <div style={S.eBox("rgba(255,255,255,0.05)")}>{b.emoji}</div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:14,textDecoration:done?"line-through":"none",color:done?"#555":"#EDE9E3",marginBottom:4}}>{b.name}</div>
