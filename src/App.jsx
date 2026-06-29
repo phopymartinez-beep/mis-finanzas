@@ -142,6 +142,7 @@ export default function App() {
   const [editingBill,setEditingBill]=useState(null);
   const [editingAcc,setEditingAcc]=useState(null);
   const [editingCat,setEditingCat]=useState(null);
+  const [resetTaps,setResetTaps]=useState(0); // 🆕 contador oculto para Reinicio
 
   const emptyTxn={amount:"",category:"",description:"",date:todayStr(),accountId:"",currency:"ARS",frequency:"once",installments:"",installmentAmountType:"perInstallment"};
   const emptyBill={name:"",emoji:"📋",amount:"",dueDay:"",isCard:false,accountId:"",installments:"",installmentCurrent:"1"};
@@ -190,16 +191,52 @@ export default function App() {
     setTxnForm(emptyTxn); setBillForm(emptyBill); setAccForm(emptyAcc); setSavForm(emptySav); setCatForm(emptyCat);
     setPayWith({billId:null,accountId:""}); setResumenPayAcc("");
     setTempRate(""); setTempBudget(""); setTempCard({closingDay:"",dueDay:""});
-    setAddSavId(null); setAddSavAmt("");
+    setAddSavId(null); setAddSavAmt(""); setDelTarget(null);
   };
 
   const {m:CM,y:CY}=getNow();
   const {m:NM,y:NY}=getNext();
   const {m:PM,y:PY}=getPrev();
 
+  // 🆕 LÓGICA DE CIERRE DE TARJETA
+  // Si la compra es DESPUÉS del día de cierre, entra al resumen del mes siguiente.
+  // Si es el día de cierre o antes, entra al resumen de este mes.
+  const resumenMonthForDate=(dateStr)=>{
+    const dt=new Date((dateStr||todayStr())+"T12:00:00");
+    let m=dt.getMonth(), y=dt.getFullYear();
+    if(dt.getDate()>cardSettings.closingDay){ m++; if(m>11){m=0;y++;} }
+    return {m,y};
+  };
+  // 🆕 Cada cuota de tarjeta tiene su propio resumen (schedule). Construye el plan
+  // partiendo del resumen real de la compra y avanzando 1 mes por cuota.
+  const buildSchedule=(purchaseDate,count)=>{
+    const {m,y}=resumenMonthForDate(purchaseDate);
+    const arr=[]; let cm=m,cy=y;
+    for(let i=1;i<=count;i++){ arr.push({n:i,m:cm,y:cy}); cm++; if(cm>11){cm=0;cy++;} }
+    return arr;
+  };
+  const dueIdx=PY*12+PM; // resumen "que vence" → referencia para congelar lo pasado
+  // Una cuota está congelada si ya se pagó su resumen o si pertenece a un resumen ya cerrado/pasado.
+  const entryLocked=(e)=>{
+    if(cardResumen.includes(resumenKey(e.m,e.y))) return true;
+    if(e.y*12+e.m < dueIdx) return true;
+    return false;
+  };
+  // ✅ bills regulares/mensuales: respeta inicio, meses salteados (skip) y fin (end)
+  const billStartedBy=(b,m,y)=>{
+    if(b.installmentStartMonth===null||b.installmentStartMonth===undefined||b.installmentStartYear===null||b.installmentStartYear===undefined) return true;
+    return monthOffset(b.installmentStartMonth,b.installmentStartYear,m,y)>=0;
+  };
+  const recurringActive=(b,m,y)=>{
+    if(!billStartedBy(b,m,y)) return false;
+    if(Array.isArray(b.skip)&&b.skip.includes(`${m}-${y}`)) return false;
+    if(b.endMonth!==null&&b.endMonth!==undefined){ if(monthOffset(b.endMonth,b.endYear,m,y)>0) return false; }
+    return true;
+  };
   const isCardBillActiveInMonth=(bill,m,y)=>{
     if(!bill.isCard) return false;
-    if(bill.installments===null) return true;
+    if(bill.installments===null) return recurringActive(bill,m,y);
+    if(Array.isArray(bill.schedule)) return bill.schedule.some(e=>e.m===m&&e.y===y);
     const sm=bill.installmentStartMonth!==null?bill.installmentStartMonth:m;
     const sy=bill.installmentStartYear!==null?bill.installmentStartYear:y;
     const offset=monthOffset(sm,sy,m,y);
@@ -208,18 +245,45 @@ export default function App() {
   };
   const getInstallmentNumber=(bill,m,y)=>{
     if(!bill.installments) return null;
+    if(Array.isArray(bill.schedule)){ const e=bill.schedule.find(x=>x.m===m&&x.y===y); return e?e.n:null; }
     const sm=bill.installmentStartMonth!==null?bill.installmentStartMonth:m;
     const sy=bill.installmentStartYear!==null?bill.installmentStartYear:y;
     return monthOffset(sm,sy,m,y);
   };
+  // 🆕 unidades en un resumen (puede haber 2 cuotas juntas tras un adelanto de cierre)
+  const cardUnitsInResumen=(b,m,y)=>{
+    if(!b.isCard) return 0;
+    if(b.installments===null) return recurringActive(b,m,y)?1:0;
+    if(Array.isArray(b.schedule)) return b.schedule.filter(e=>e.m===m&&e.y===y).length;
+    return isCardBillActiveInMonth(b,m,y)?1:0;
+  };
+  const cardFixedTotalForResumen=(m,y)=>bills.reduce((s,b)=>s+cardUnitsInResumen(b,m,y)*b.amount,0);
+  // 🆕 filas de tarjeta para un resumen (con número de cuota y la entrada, para mover/borrar)
+  const cardRowsForResumen=(m,y)=>{
+    const rows=[];
+    bills.forEach(b=>{
+      if(!b.isCard) return;
+      if(b.installments===null){ if(recurringActive(b,m,y)) rows.push({bill:b,n:null,e:null}); }
+      else if(Array.isArray(b.schedule)){ b.schedule.filter(e=>e.m===m&&e.y===y).forEach(e=>rows.push({bill:b,n:e.n,e})); }
+      else if(isCardBillActiveInMonth(b,m,y)){ rows.push({bill:b,n:getInstallmentNumber(b,m,y),e:null}); }
+    });
+    return rows;
+  };
+
+  const txnInResumen=(t,m,y)=>{
+    if(t.type!=="gasto"||t.accountId!=="tarjeta") return false;
+    const r=resumenMonthForDate(t.date);
+    return r.m===m&&r.y===y;
+  };
+  const cardTxnsForResumen=(m,y)=>txns.filter(t=>txnInResumen(t,m,y));
 
   const activeCardBillsThisMonth=bills.filter(b=>isCardBillActiveInMonth(b,CM,CY));
-  const cardBillsTotal=activeCardBillsThisMonth.reduce((s,b)=>s+b.amount,0);
   const activeCardBillsPrevMonth=bills.filter(b=>isCardBillActiveInMonth(b,PM,PY));
-  const prevResumenAmount=activeCardBillsPrevMonth.reduce((s,b)=>s+b.amount,0)
-    +txns.filter(t=>{if(t.type!=="gasto"||t.accountId!=="tarjeta")return false;const dt=new Date(t.date+"T12:00:00");return dt.getMonth()===PM&&dt.getFullYear()===PY;}).reduce((s,t)=>s+toARS(t),0);
-  const currAccumulating=cardBillsTotal
-    +txns.filter(t=>{if(t.type!=="gasto"||t.accountId!=="tarjeta")return false;const dt=new Date(t.date+"T12:00:00");return dt.getMonth()===CM&&dt.getFullYear()===CY;}).reduce((s,t)=>s+toARS(t),0);
+  // ✅ totales por cierre, contando cuotas dobles si las hubiera
+  const prevResumenAmount=cardFixedTotalForResumen(PM,PY)
+    +cardTxnsForResumen(PM,PY).reduce((s,t)=>s+toARS(t),0);
+  const currAccumulating=cardFixedTotalForResumen(CM,CY)
+    +cardTxnsForResumen(CM,CY).reduce((s,t)=>s+toARS(t),0);
 
   const prevResumenKey_=resumenKey(PM,PY);
   const prevResumenPaid=cardResumen.includes(prevResumenKey_);
@@ -227,15 +291,10 @@ export default function App() {
   const resumenDaysLeft=daysUntil(resumenDueDay,CM,CY);
 
   const regularBills=bills.filter(b=>!b.isCard);
-  // ✅ FIX: solo muestra bills regulares que ya empezaron (startMonth <= mes actual)
-  const billStartedBy=(b,m,y)=>{
-    if(b.installmentStartMonth===null||b.installmentStartYear===null) return true;
-    return monthOffset(b.installmentStartMonth,b.installmentStartYear,m,y)>=0;
-  };
-  const regularBillsSorted=[...regularBills].filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&billStartedBy(b,CM,CY)).sort((a,b2)=>a.dueDay-b2.dueDay);
+  const regularBillsSorted=[...regularBills].filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&recurringActive(b,CM,CY)).sort((a,b2)=>a.dueDay-b2.dueDay);
   const pendingRegularBills=regularBillsSorted.filter(b=>!isPaid(b.id,CM,CY));
   const pendingTotal=pendingRegularBills.reduce((s,b)=>s+b.amount,0)+(prevResumenPaid?0:prevResumenAmount);
-  const monthlyFixedTotal=bills.filter(b=>{ if(b.isCard) return isCardBillActiveInMonth(b,CM,CY); return (b.installments===null||b.installmentCurrent<=b.installments)&&billStartedBy(b,CM,CY); }).reduce((s,b)=>s+b.amount,0);
+  const monthlyFixedTotal=regularBills.filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&recurringActive(b,CM,CY)).reduce((s,b)=>s+b.amount,0)+cardFixedTotalForResumen(CM,CY);
   const urgentRegular=pendingRegularBills.filter(b=>daysUntil(b.dueDay,CM,CY)<=5).sort((a,b2)=>daysUntil(a.dueDay,CM,CY)-daysUntil(b2.dueDay,CM,CY));
   const resumenIsUrgent=!prevResumenPaid&&resumenDaysLeft<=5&&prevResumenAmount>0;
 
@@ -259,8 +318,9 @@ export default function App() {
   const monthlyChartData=last12.map(({m,y,label})=>{
     const txnSpend=txns.filter(t=>{ if(t.type!=="gasto"||t.accountId==="tarjeta")return false; const dt=new Date(t.date+"T12:00:00"); return dt.getMonth()===m&&dt.getFullYear()===y; }).reduce((s,t)=>s+toARS(t),0);
     const billSpend=regularBills.filter(b=>paid.includes(paidKey(b.id,m,y))).reduce((s,b)=>s+b.amount,0);
-    const cardTxn=txns.filter(t=>{ if(t.type!=="gasto"||t.accountId!=="tarjeta")return false; const dt=new Date(t.date+"T12:00:00"); return dt.getMonth()===m&&dt.getFullYear()===y; }).reduce((s,t)=>s+toARS(t),0);
-    const cardFixed=bills.filter(b=>isCardBillActiveInMonth(b,m,y)).reduce((s,b)=>s+b.amount,0);
+    // ✅ tarjeta agrupada por cierre
+    const cardTxn=cardTxnsForResumen(m,y).reduce((s,t)=>s+toARS(t),0);
+    const cardFixed=cardFixedTotalForResumen(m,y);
     return{label,txns:Math.round(txnSpend/1000)*1000,bills:Math.round(billSpend/1000)*1000,card:Math.round((cardFixed+cardTxn)/1000)*1000};
   });
   const gatosCatData=catsGasto.map(c=>({...c,total:txns.filter(t=>t.type==="gasto"&&t.category===c.name).reduce((s,t)=>s+toARS(t),0)})).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
@@ -282,8 +342,13 @@ export default function App() {
       let perInst=parseFloat(txnForm.amount);
       if(txnForm.installmentAmountType==="total") perInst=Math.round(perInst/totalInst);
       const isCard=txnForm.accountId==="tarjeta";
-      const cd=new Date(txnForm.date+"T12:00:00");
-      const b={id:Date.now(),name:txnForm.description||txnForm.category,emoji:"💳",amount:perInst,dueDay:cd.getDate()||1,isCard,accountId:txnForm.accountId,installments:totalInst,installmentCurrent:1,installmentStartMonth:cd.getMonth(),installmentStartYear:cd.getFullYear()};
+      const pDate=txnForm.date||todayStr();
+      const cd=new Date(pDate+"T12:00:00");
+      let startM=cd.getMonth(), startY=cd.getFullYear();
+      let schedule=null;
+      // 🆕 tarjeta: cada cuota guarda su resumen propio (según el cierre vigente al cargarla)
+      if(isCard){ schedule=buildSchedule(pDate,totalInst); startM=schedule[0].m; startY=schedule[0].y; }
+      const b={id:Date.now(),name:txnForm.description||txnForm.category||"Compra en cuotas",emoji:"💳",amount:perInst,dueDay:cd.getDate()||1,isCard,accountId:txnForm.accountId,installments:totalInst,installmentCurrent:1,installmentStartMonth:startM,installmentStartYear:startY,purchaseDate:pDate,schedule};
       const u=[...bills,b]; setBills(u); await dbSave(KEYS.bills,u); await saveToFirestore({bills:JSON.stringify(u)});
       doFlash(); closeModal(); return;
     }
@@ -340,8 +405,68 @@ export default function App() {
   const saveBillEdit=async()=>{
     if(!billForm.name||!billForm.amount||!billForm.dueDay) return;
     const hasInst=billForm.installments&&parseInt(billForm.installments)>0;
-    const u=bills.map(b=>b.id===editingBill?{...b,name:billForm.name,emoji:billForm.emoji,amount:parseFloat(billForm.amount),dueDay:parseInt(billForm.dueDay),isCard:billForm.isCard,accountId:billForm.isCard?"tarjeta":(billForm.accountId||""),installments:hasInst?parseInt(billForm.installments):null,installmentCurrent:hasInst?parseInt(billForm.installmentCurrent):null}:b);
+    const u=bills.map(b=>{
+      if(b.id!==editingBill) return b;
+      const nb={...b,name:billForm.name,emoji:billForm.emoji,amount:parseFloat(billForm.amount),dueDay:parseInt(billForm.dueDay),isCard:billForm.isCard,accountId:billForm.isCard?"tarjeta":(billForm.accountId||""),installments:hasInst?parseInt(billForm.installments):null,installmentCurrent:hasInst?parseInt(billForm.installmentCurrent):null};
+      // 🆕 si es cuota de tarjeta y cambió la cantidad de cuotas, rearmamos el schedule (respetando lo ya pagado)
+      if(nb.isCard&&hasInst){
+        const newCount=parseInt(billForm.installments);
+        if(!Array.isArray(b.schedule)){ nb.schedule=buildSchedule(b.purchaseDate||todayStr(),newCount); nb.purchaseDate=b.purchaseDate||todayStr(); }
+        else if(b.schedule.length!==newCount){
+          const kept=b.schedule.filter(e=>e.n<=newCount);
+          if(newCount>b.schedule.length){ const nat=buildSchedule(b.purchaseDate||todayStr(),newCount); for(let i=b.schedule.length+1;i<=newCount;i++){ const x=nat.find(z=>z.n===i); kept.push({n:i,m:x.m,y:x.y}); } }
+          nb.schedule=kept.sort((a,c)=>a.n-c.n);
+        }
+      }
+      if(!nb.isCard||!hasInst){ nb.schedule=null; }
+      return nb;
+    });
     setBills(u); await dbSave(KEYS.bills,u); await saveToFirestore({bills:JSON.stringify(u)}); doFlash(); closeModal();
+  };
+
+  // 🆕 BORRAR CUOTA (con confirmación de "siguientes")
+  const [delTarget,setDelTarget]=useState(null); // {kind, billId, n, m, y, name}
+  const openDelCuota=(b,n,m,y)=>{ setDelTarget({kind:"cuota",billId:b.id,n,m,y,name:b.name,hasSchedule:Array.isArray(b.schedule)}); setModal("delCuota"); };
+  const openDelMonthly=(b,m,y)=>{ setDelTarget({kind:"monthly",billId:b.id,m,y,name:b.name}); setModal("delMonthly"); };
+  const deleteCuota=async(mode)=>{
+    const b=bills.find(x=>x.id===delTarget.billId); if(!b){closeModal();return;}
+    let u;
+    if(Array.isArray(b.schedule)){
+      let sched;
+      if(mode==="onlyThis") sched=b.schedule.filter(e=>e.n!==delTarget.n);
+      else sched=b.schedule.filter(e=>e.n<delTarget.n||entryLocked(e)); // esta y las siguientes (sin tocar lo congelado)
+      u=sched.length===0?bills.filter(x=>x.id!==b.id):bills.map(x=>x.id===b.id?{...x,schedule:sched}:x);
+    } else {
+      u=bills.filter(x=>x.id!==b.id); // modelo viejo sin schedule → se borra la compra completa
+    }
+    setBills(u); await dbSave(KEYS.bills,u); await saveToFirestore({bills:JSON.stringify(u)}); doFlash(); closeModal();
+  };
+  const deleteMonthly=async(mode)=>{
+    const b=bills.find(x=>x.id===delTarget.billId); if(!b){closeModal();return;}
+    const {m,y}=delTarget; let u;
+    if(mode==="all"){ u=bills.filter(x=>x.id!==b.id); }
+    else if(mode==="onlyThis"){ const skip=Array.isArray(b.skip)?[...b.skip]:[]; if(!skip.includes(`${m}-${y}`)) skip.push(`${m}-${y}`); u=bills.map(x=>x.id===b.id?{...x,skip}:x); }
+    else { let em=m-1,ey=y; if(em<0){em=11;ey--;} if(b.installmentStartMonth!==null&&b.installmentStartMonth!==undefined&&monthOffset(b.installmentStartMonth,b.installmentStartYear,em,ey)<0){ u=bills.filter(x=>x.id!==b.id); } else u=bills.map(x=>x.id===b.id?{...x,endMonth:em,endYear:ey}:x); }
+    setBills(u); await dbSave(KEYS.bills,u); await saveToFirestore({bills:JSON.stringify(u)}); doFlash(); closeModal();
+  };
+  // 🆕 RECALCULAR cuotas no pagadas según el día de cierre actual (congela pagadas/pasadas)
+  const recalcInstallments=async()=>{
+    const u=bills.map(b=>{
+      if(!b.isCard||b.installments===null||!Array.isArray(b.schedule)||!b.purchaseDate) return b;
+      const natural=buildSchedule(b.purchaseDate,b.installments);
+      const newSched=b.schedule.map(e=>{ if(entryLocked(e)) return e; const nat=natural.find(x=>x.n===e.n); return nat?{...e,m:nat.m,y:nat.y}:e; });
+      return {...b,schedule:newSched};
+    });
+    setBills(u); await dbSave(KEYS.bills,u); await saveToFirestore({bills:JSON.stringify(u)}); doFlash();
+  };
+  // 🆕 mover una cuota puntual (adelanto de cierre por feriado, etc.)
+  const moveCuota=async(billId,n,dir)=>{
+    const u=bills.map(b=>{
+      if(b.id!==billId||!Array.isArray(b.schedule)) return b;
+      const sched=b.schedule.map(e=>{ if(e.n!==n) return e; let m=e.m+dir,y=e.y; if(m>11){m=0;y++;} if(m<0){m=11;y--;} return {...e,m,y}; });
+      return {...b,schedule:sched};
+    });
+    setBills(u); await dbSave(KEYS.bills,u); await saveToFirestore({bills:JSON.stringify(u)});
   };
 
   // ── Toggle paid ────────────────────────────────────────────────────────────
@@ -407,6 +532,28 @@ export default function App() {
   const saveRate=async()=>{ const n=parseFloat(tempRate); if(!n||n<=0) return; setUsdRate(n); await dbSave(KEYS.usdRate,n); await saveToFirestore({usdRate:JSON.stringify(n)}); doFlash(); closeModal(); }; // ✅ FIX
   const saveBudget=async()=>{ const n=parseFloat(tempBudget); if(!n||n<=0) return; setBudget(n); await dbSave(KEYS.budget,n); await saveToFirestore({budget:JSON.stringify(n)}); doFlash(); closeModal(); }; // ✅ FIX
   const saveCardSettings_=async()=>{ const s={closingDay:parseInt(tempCard.closingDay)||25,dueDay:parseInt(tempCard.dueDay)||1}; setCardSettings(s); await dbSave(KEYS.cardSettings,s); await saveToFirestore({cardSettings:JSON.stringify(s)}); doFlash(); closeModal(); }; // ✅ FIX
+
+  // 🆕 REINICIO TOTAL — borra todos los datos de prueba y vuelve todo a cero.
+  // Mantiene la configuración (tipo de cambio y fechas de tarjeta).
+  const resetAll=async()=>{
+    setTxns([]); setBills([]); setPaid([]); setCardResumen([]); setSavings([]);
+    setAccounts(DEFAULT_ACCOUNTS); setBudget(0);
+    setCatsGasto(DEFAULT_CATS_GASTO); setCatsIngreso(DEFAULT_CATS_INGRESO);
+    setAccountDetail(null); setTab("home");
+    await Promise.all([
+      dbSave(KEYS.txns,[]), dbSave(KEYS.bills,[]), dbSave(KEYS.paid,[]),
+      dbSave(KEYS.cardResumen,[]), dbSave(KEYS.savings,[]),
+      dbSave(KEYS.accounts,DEFAULT_ACCOUNTS), dbSave(KEYS.budget,0),
+      dbSave(KEYS.catsGasto,DEFAULT_CATS_GASTO), dbSave(KEYS.catsIngreso,DEFAULT_CATS_INGRESO),
+    ]);
+    await saveToFirestore({
+      txns:JSON.stringify([]), bills:JSON.stringify([]), paid:JSON.stringify([]),
+      cardResumen:JSON.stringify([]), savings:JSON.stringify([]),
+      accounts:JSON.stringify(DEFAULT_ACCOUNTS), budget:JSON.stringify(0),
+      catsGasto:JSON.stringify(DEFAULT_CATS_GASTO), catsIngreso:JSON.stringify(DEFAULT_CATS_INGRESO),
+    });
+    doFlash(); setTimeout(()=>closeModal(),600);
+  };
 
   const C={gold:"#C8A97E",red:"#E85A5A",green:"#5AE89A",blue:"#5A9BE8",pink:"#E87ACE",purple:"#A07CFE",bg:"#0D0D12",text:"#EDE9E3"};
   const S={
@@ -566,7 +713,7 @@ export default function App() {
           <label style={S.lbl}>Cantidad de cuotas</label>
           <input style={{...S.inp,marginBottom:14}} type="number" min="2" placeholder="ej: 12" value={txnForm.installments} onChange={e=>setTxnForm(f=>({...f,installments:e.target.value}))}/>
           {txnForm.amount&&txnForm.installments&&<div style={{fontSize:12,color:C.purple,textAlign:"center",marginBottom:12}}>{txnForm.installmentAmountType==="total"?`${fmt(Math.round(parseFloat(txnForm.amount)/parseInt(txnForm.installments)))} por cuota`:`${fmt(parseFloat(txnForm.amount)*parseInt(txnForm.installments))} total`}</div>}
-          {txnForm.accountId==="tarjeta"&&<div style={{background:"rgba(232,122,206,0.08)",border:"1px solid rgba(232,122,206,0.2)",borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.pink}}>💳 Primera cuota aparece en el resumen del <strong>mes siguiente</strong> a la compra.</div>}
+          {txnForm.accountId==="tarjeta"&&<div style={{background:"rgba(232,122,206,0.08)",border:"1px solid rgba(232,122,206,0.2)",borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.pink}}>💳 Según el cierre (día {cardSettings.closingDay}): si comprás <strong>antes o el día del cierre</strong>, la 1ª cuota cae en el resumen de este mes; si comprás <strong>después</strong>, cae en el del mes siguiente.</div>}
         </>}
         {txnForm.frequency==="monthly"&&<div style={{background:"rgba(90,232,154,0.08)",border:"1px solid rgba(90,232,154,0.2)",borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.green}}>🔁 Se repetirá automáticamente en Pagos cada mes.</div>}
       </>}
@@ -665,6 +812,9 @@ export default function App() {
       <label style={S.lbl}>Día de vencimiento (mes siguiente)</label>
       <input style={{...S.inp,marginBottom:24}} type="number" min="1" max="31" placeholder={String(cardSettings.dueDay)} value={tempCard.dueDay} onChange={e=>setTempCard(f=>({...f,dueDay:e.target.value}))}/>
       <button style={S.sub(C.pink)} onClick={saveCardSettings_}>{flash?"✅ Guardado":"Guardar"}</button>
+      <div style={{height:14}}/>
+      <div style={{fontSize:12,color:"#888",lineHeight:1.7,marginBottom:10}}>Si cambiás el cierre de forma permanente, podés reacomodar las cuotas que todavía no pagaste al ciclo que les corresponde. Las cuotas ya pagadas o de resúmenes cerrados <strong style={{color:"#aaa"}}>no se tocan</strong>.</div>
+      <button style={{width:"100%",padding:14,borderRadius:13,background:"rgba(124,158,254,0.1)",border:"1px solid rgba(124,158,254,0.3)",color:"#7C9EFE",fontSize:14,cursor:"pointer",fontFamily:"Georgia,serif"}} onClick={recalcInstallments}>{flash?"✅ Cuotas recalculadas":"🔄 Recalcular cuotas con el cierre actual"}</button>
     </div></div>
   );
 
@@ -676,7 +826,8 @@ export default function App() {
         <div style={{fontSize:34,fontFamily:"Georgia",color:C.pink,marginBottom:4}}>{fmt(prevResumenAmount)}</div>
       </div>
       <div style={{...S.card(),marginBottom:14,maxHeight:150,overflowY:"auto"}}>
-        {activeCardBillsPrevMonth.map(b=><div key={b.id} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>{b.emoji}</span><span style={{flex:1,fontSize:13}}>{b.name}</span><span style={{fontSize:13,fontFamily:"Georgia",color:C.pink}}>{fmt(b.amount)}</span></div>)}
+        {cardRowsForResumen(PM,PY).map(({bill:b,n},i)=><div key={`${b.id}-${n}-${i}`} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>{b.emoji}</span><span style={{flex:1,fontSize:13}}>{b.name}{n!==null&&<span style={{fontSize:10,color:"#888",marginLeft:6}}>C{n}/{b.installments}</span>}</span><span style={{fontSize:13,fontFamily:"Georgia",color:C.pink}}>{fmt(b.amount)}</span></div>)}
+        {cardTxnsForResumen(PM,PY).map(t=><div key={t.id} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>🛒</span><span style={{flex:1,fontSize:13}}>{t.description||t.category}</span><span style={{fontSize:13,fontFamily:"Georgia",color:C.pink}}>{fmt(toARS(t))}</span></div>)}
       </div>
       <label style={S.lbl}>¿Con qué cuenta pagás?</label>
       <AccPills selected={resumenPayAcc} onSelect={setResumenPayAcc} showNone={true} exclude={["tarjeta"]}/>
@@ -684,7 +835,43 @@ export default function App() {
     </div></div>
   );
 
-  // ══ ACCOUNT DETAIL ══
+  // 🆕 MODAL DE REINICIO (zona de peligro, oculto)
+  if(modal==="reset") return(
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
+      <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Zona de peligro</div></div>
+      <div style={{fontSize:48,textAlign:"center",marginBottom:16}}>⚠️</div>
+      <div style={{fontSize:22,textAlign:"center",color:C.red,marginBottom:12}}>Reiniciar todo</div>
+      <div style={{fontSize:13,color:"#888",textAlign:"center",lineHeight:1.8,marginBottom:24}}>Esto borra <strong style={{color:C.text}}>todos</strong> tus movimientos, pagos, cuotas, resúmenes, cuentas y metas de ahorro, y vuelve todo a cero. Se mantiene tu configuración (tipo de cambio y fechas de tarjeta).<br/><br/><strong style={{color:C.red}}>Esta acción no se puede deshacer.</strong></div>
+      <button style={{...S.sub(C.red),marginBottom:10}} onClick={resetAll}>{flash?"✅ Todo reiniciado":"Sí, borrar todo y empezar de cero"}</button>
+      <button style={{width:"100%",padding:14,borderRadius:13,background:"transparent",border:"1px solid rgba(255,255,255,0.12)",color:"#888",fontSize:14,cursor:"pointer",fontFamily:"Georgia,serif"}} onClick={closeModal}>Cancelar</button>
+    </div></div>
+  );
+
+  // 🆕 MODAL: borrar cuota (preguntar por las siguientes)
+  if(modal==="delCuota"&&delTarget) return(
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
+      <div style={{...S.row,marginBottom:18}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Borrar cuota</div></div>
+      <div style={{fontSize:18,textAlign:"center",marginBottom:8}}>💳 {delTarget.name}</div>
+      <div style={{fontSize:13,color:"#888",textAlign:"center",lineHeight:1.7,marginBottom:24}}>{delTarget.hasSchedule?<>¿Querés borrar solo esta cuota o esta y todas las que faltan? Las cuotas ya pagadas o de resúmenes cerrados no se tocan.</>:<>Esta compra es de un formato viejo (sin cuotas separadas), así que se borra completa.</>}</div>
+      {delTarget.hasSchedule&&<button style={{...S.sub(C.red),marginBottom:10}} onClick={()=>deleteCuota("thisAndNext")}>{flash?"✅ Borrado":"Borrar esta y las siguientes"}</button>}
+      {delTarget.hasSchedule&&<button style={{width:"100%",padding:14,borderRadius:13,background:"rgba(232,90,90,0.1)",border:"1px solid rgba(232,90,90,0.3)",color:C.red,fontSize:14,cursor:"pointer",fontFamily:"Georgia,serif",marginBottom:10}} onClick={()=>deleteCuota("onlyThis")}>Borrar solo esta cuota</button>}
+      {!delTarget.hasSchedule&&<button style={{...S.sub(C.red),marginBottom:10}} onClick={()=>deleteCuota("thisAndNext")}>{flash?"✅ Borrado":"Borrar esta compra"}</button>}
+      <button style={{width:"100%",padding:14,borderRadius:13,background:"transparent",border:"1px solid rgba(255,255,255,0.12)",color:"#888",fontSize:14,cursor:"pointer",fontFamily:"Georgia,serif"}} onClick={closeModal}>Cancelar</button>
+    </div></div>
+  );
+
+  // 🆕 MODAL: borrar gasto mensual (preguntar por los siguientes)
+  if(modal==="delMonthly"&&delTarget) return(
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
+      <div style={{...S.row,marginBottom:18}}><button onClick={closeModal} style={S.back}>←</button><div style={S.ey}>Borrar gasto mensual</div></div>
+      <div style={{fontSize:18,textAlign:"center",marginBottom:8}}>🔁 {delTarget.name}</div>
+      <div style={{fontSize:13,color:"#888",textAlign:"center",lineHeight:1.7,marginBottom:24}}>Es un gasto que se repite todos los meses. ¿Qué querés borrar?</div>
+      <button style={{...S.sub(C.red),marginBottom:10}} onClick={()=>deleteMonthly("thisAndFollowing")}>{flash?"✅ Borrado":`Borrar desde ${MONTHS_FULL[delTarget.m]} en adelante`}</button>
+      <button style={{width:"100%",padding:14,borderRadius:13,background:"rgba(232,90,90,0.1)",border:"1px solid rgba(232,90,90,0.3)",color:C.red,fontSize:14,cursor:"pointer",fontFamily:"Georgia,serif",marginBottom:10}} onClick={()=>deleteMonthly("onlyThis")}>Borrar solo {MONTHS_FULL[delTarget.m]}</button>
+      <button style={{width:"100%",padding:14,borderRadius:13,background:"rgba(232,90,90,0.1)",border:"1px solid rgba(232,90,90,0.3)",color:C.red,fontSize:14,cursor:"pointer",fontFamily:"Georgia,serif",marginBottom:10}} onClick={()=>deleteMonthly("all")}>Borrar todos (desde siempre)</button>
+      <button style={{width:"100%",padding:14,borderRadius:13,background:"transparent",border:"1px solid rgba(255,255,255,0.12)",color:"#888",fontSize:14,cursor:"pointer",fontFamily:"Georgia,serif"}} onClick={closeModal}>Cancelar</button>
+    </div></div>
+  );
   if(accountDetail){
     const acc=accounts.find(a=>a.id===accountDetail);
     if(!acc){ setAccountDetail(null); return null; }
@@ -747,16 +934,18 @@ export default function App() {
             </div>
             <div style={{padding:"12px 16px"}}>
               <div style={{fontSize:9,color:C.pink,letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>Detalle</div>
-              {bills.filter(b=>isCardBillActiveInMonth(b,viewCurr?PM:CM,viewCurr?PY:CY)).map(b=>(<div key={b.id} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}><span style={{fontSize:15}}>{b.emoji}</span><span style={{flex:1,fontSize:13,color:"#C0B0F0"}}>{b.name}</span>{b.installments&&<span style={{fontSize:10,color:"#666",marginRight:6}}>C{getInstallmentNumber(b,viewCurr?PM:CM,viewCurr?PY:CY)}/{b.installments}</span>}<button onClick={()=>startEditBill(b)} style={{...S.penBtn,marginRight:4}}>✏️</button><span style={{fontSize:13,fontFamily:"Georgia",color:"#C0B0F0"}}>{fmt(b.amount)}</span></div>))}
+              {cardRowsForResumen(viewCurr?PM:CM,viewCurr?PY:CY).map(({bill:b,n,e},i)=>{const mov=e&&!entryLocked(e);return(<div key={`${b.id}-${n}-${i}`} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}><span style={{fontSize:15}}>{b.emoji}</span><span style={{flex:1,fontSize:13,color:"#C0B0F0"}}>{b.name}</span>{n!==null&&<span style={{fontSize:10,color:"#666",marginRight:6}}>C{n}/{b.installments}</span>}{mov&&<><button title="Mover al resumen anterior" onClick={()=>moveCuota(b.id,n,-1)} style={{...S.penBtn,marginRight:0,color:"#7C9EFE"}}>◀</button><button title="Mover al resumen siguiente" onClick={()=>moveCuota(b.id,n,1)} style={{...S.penBtn,marginRight:4,color:"#7C9EFE"}}>▶</button></>}<button onClick={()=>startEditBill(b)} style={{...S.penBtn,marginRight:4}}>✏️</button><button onClick={()=>n===null?openDelMonthly(b,viewCurr?PM:CM,viewCurr?PY:CY):openDelCuota(b,n,viewCurr?PM:CM,viewCurr?PY:CY)} style={{...S.xBtn,marginRight:6}}>×</button><span style={{fontSize:13,fontFamily:"Georgia",color:"#C0B0F0"}}>{fmt(b.amount)}</span></div>);})}
+              {/* 🆕 compras sueltas con tarjeta que entran a este resumen (editables/borrables) */}
+              {cardTxnsForResumen(viewCurr?PM:CM,viewCurr?PY:CY).map(t=>{const cat=catsGasto.find(c=>c.name===t.category)||{emoji:"🛒",color:"#C0B0F0"};return(<div key={t.id} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}><span style={{fontSize:15}}>{cat.emoji}</span><span style={{flex:1,fontSize:13,color:"#C0B0F0"}}>{t.description||t.category}</span><button onClick={()=>startEditTxn(t)} style={{...S.penBtn,marginRight:4}}>✏️</button><button onClick={()=>delTxn(t.id)} style={{...S.xBtn,marginRight:6}}>×</button><span style={{fontSize:13,fontFamily:"Georgia",color:"#C0B0F0"}}>{fmt(toARS(t))}</span></div>);})}
             </div>
           </div>
         </div>
         <div style={S.sec}>📋 Gastos fijos mensuales — por fecha de vencimiento</div>
         <div style={{padding:"0 14px",marginBottom:80}}>
           {/* ✅ FIX: filtramos por el mes que se está viendo, no solo el actual */}
-          {regularBills.filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&billStartedBy(b,viewM,viewY)).sort((a,b2)=>a.dueDay-b2.dueDay).length===0
+          {regularBills.filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&recurringActive(b,viewM,viewY)).sort((a,b2)=>a.dueDay-b2.dueDay).length===0
             ?<div style={{textAlign:"center",padding:"24px",color:"#444",fontSize:13}}>Sin gastos fijos. Tocá + para agregar.</div>
-          :regularBills.filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&billStartedBy(b,viewM,viewY)).sort((a,b2)=>a.dueDay-b2.dueDay).map(b=>{
+          :regularBills.filter(b=>(b.installments===null||b.installmentCurrent<=b.installments)&&recurringActive(b,viewM,viewY)).sort((a,b2)=>a.dueDay-b2.dueDay).map(b=>{
             const done=isPaid(b.id,viewM,viewY);
             const selecting=payWith.billId===b.id&&viewCurr;
             return(
@@ -770,7 +959,7 @@ export default function App() {
                   </div>
                   <div style={{fontSize:15,fontFamily:"Georgia",color:done?"#555":"#EDE9E3",flexShrink:0}}>{fmt(b.amount)}</div>
                   <button onClick={()=>startEditBill(b)} style={S.penBtn}>✏️</button>
-                  <button onClick={()=>delBill(b.id)} style={S.xBtn}>×</button>
+                  <button onClick={()=>b.installments===null?openDelMonthly(b,viewM,viewY):openDelCuota(b,b.installmentCurrent,viewM,viewY)} style={S.xBtn}>×</button>
                 </div>
                 {selecting&&!done&&(
                   <div style={{background:"rgba(200,169,126,0.06)",border:"1px solid rgba(200,169,126,0.15)",borderRadius:12,margin:"0 4px 10px",padding:"12px"}}>
@@ -778,7 +967,7 @@ export default function App() {
                     <AccPills selected={payWith.accountId} onSelect={id=>setPayWith(p=>({...p,accountId:id}))} showNone={true}/>
                     <div style={{display:"flex",gap:8}}>
                       <button onClick={()=>setPayWith({billId:null,accountId:""})} style={{flex:1,padding:"9px",borderRadius:9,background:"transparent",border:"1px solid rgba(255,255,255,0.1)",color:"#666",fontSize:13,cursor:"pointer"}}>Cancelar</button>
-                      <button disabled={!payWith.accountId} onClick={()=>togglePaid(b.id,payWith.accountId,viewM,viewY)} style={{flex:2,padding:"9px",borderRadius:9,background:payWith.accountId?C.gold:"#333",border:"none",color:payWith.accountId?C.bg:"#555",fontSize:13,cursor:payWith.accountId?"pointer":"default",fontFamily:"Georgia"}}>✓ Marcar pagado</button>
+                      <button disabled={!payWith.accountId} onClick={()=>togglePaid(b.id,payWith.accountId,viewM,viewY)} style={{flex:2,padding:"9px",borderRadius:9,background:payWith.accountId?C.gold:"#333",border:"none",color:payWith.accountId?C.bg:"#555",fontSize:13,cursor:"pointer",fontFamily:"Georgia"}}>✓ Marcar pagado</button>
                     </div>
                   </div>
                 )}
@@ -823,7 +1012,8 @@ export default function App() {
             </div>
             {isTarjeta&&<div style={{marginTop:12,paddingTop:10,borderTop:"1px solid rgba(232,122,206,0.15)"}}>
               <div style={{fontSize:9,color:C.pink,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>Acumulando {MONTHS_FULL[CM]}</div>
-              {activeCardBillsThisMonth.map(b=><div key={b.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#C0B0F0",padding:"2px 0"}}><span>{b.emoji} {b.name}</span><span style={{fontFamily:"Georgia"}}>{fmt(b.amount)}</span></div>)}
+              {cardRowsForResumen(CM,CY).map(({bill:b,n},i)=><div key={`${b.id}-${n}-${i}`} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#C0B0F0",padding:"2px 0"}}><span>{b.emoji} {b.name}{n!==null&&<span style={{color:"#888",marginLeft:4}}>C{n}/{b.installments}</span>}</span><span style={{fontFamily:"Georgia"}}>{fmt(b.amount)}</span></div>)}
+              {cardTxnsForResumen(CM,CY).map(t=><div key={t.id} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#C0B0F0",padding:"2px 0"}}><span>🛒 {t.description||t.category}</span><span style={{fontFamily:"Georgia"}}>{fmt(toARS(t))}</span></div>)}
               <div style={{display:"flex",justifyContent:"space-between",fontSize:13,color:C.pink,padding:"8px 0 0",borderTop:"1px solid rgba(232,122,206,0.15)",marginTop:4}}><span>Total → vence {cardSettings.dueDay}/{NM+1}</span><span style={{fontFamily:"Georgia"}}>{fmt(currAccumulating)}</span></div>
             </div>}
           </div>
@@ -845,6 +1035,10 @@ export default function App() {
         [()=>{setTempRate(String(usdRate));setModal("usd");},"rgba(90,155,232,0.07)","rgba(90,155,232,0.2)",C.blue,`🇺🇸 TC dólar: $${usdRate.toLocaleString("es-AR")}/US$`],
         [()=>{setTempBudget(String(budget));setModal("budget");},"rgba(90,232,154,0.07)","rgba(90,232,154,0.2)",C.green,`🎯 Presupuesto: ${budget>0?fmt(budget):"No configurado"}`],
       ].map(([fn,bg,border,col,label],i)=>(<div key={i} style={{margin:"6px 14px"}}><button onClick={fn} style={{width:"100%",padding:12,borderRadius:12,background:bg,border:`1px solid ${border}`,color:col,fontSize:13,cursor:"pointer",fontFamily:"Georgia"}}>{label}</button></div>))}
+      {/* 🆕 GATILLO OCULTO DE REINICIO — tocá 7 veces "v6.0" para abrir la zona de peligro */}
+      <div style={{textAlign:"center",padding:"30px 0 90px"}}>
+        <span onClick={()=>{const n=resetTaps+1;setResetTaps(n);if(n>=7){setResetTaps(0);setModal("reset");}}} style={{fontSize:10,color:"#1B1B23",userSelect:"none",letterSpacing:3,cursor:"default"}}>v6.0</span>
+      </div>
       <button style={S.fab} onClick={()=>setModal("account")}>+</button>
       <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
       </div>
@@ -868,7 +1062,7 @@ export default function App() {
       <div style={S.sec}>📋 Compromisos fijos mensuales</div>
       <div style={S.card()}>
         <div style={{...S.row,marginBottom:12,paddingBottom:10,borderBottom:"1px solid rgba(255,255,255,0.07)"}}><span style={{flex:1,fontSize:13,color:"#888"}}>Total comprometido por mes</span><span style={{fontSize:20,fontFamily:"Georgia",color:C.gold}}>{fmt(monthlyFixedTotal)}</span></div>
-        {bills.filter(b=>{ if(b.isCard) return isCardBillActiveInMonth(b,CM,CY); return b.installments===null||b.installmentCurrent<=b.installments; }).sort((a,b2)=>a.dueDay-b2.dueDay).map(b=>(<div key={b.id} style={{...S.row,padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>{b.emoji}</span><span style={{flex:1,fontSize:13,color:"#C8C4BE"}}>{b.name}{b.isCard&&<span style={{color:C.pink,marginLeft:4,fontSize:10}}>💳</span>}</span>{b.installments&&<span style={{fontSize:10,color:"#666",marginRight:6}}>C{b.installmentCurrent}/{b.installments}</span>}<span style={{fontSize:10,color:"#555",marginRight:8}}>día {b.dueDay}</span><span style={{fontSize:14,fontFamily:"Georgia",color:"#EDE9E3"}}>{fmt(b.amount)}</span><button onClick={()=>startEditBill(b)} style={S.penBtn}>✏️</button></div>))}
+        {bills.filter(b=>{ if(b.isCard) return isCardBillActiveInMonth(b,CM,CY)||isCardBillActiveInMonth(b,PM,PY); return (b.installments===null||b.installmentCurrent<=b.installments)&&recurringActive(b,CM,CY); }).sort((a,b2)=>a.dueDay-b2.dueDay).map(b=>{const cn=b.isCard&&Array.isArray(b.schedule)?(getInstallmentNumber(b,CM,CY)||getInstallmentNumber(b,PM,PY)):b.installmentCurrent;return(<div key={b.id} style={{...S.row,padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>{b.emoji}</span><span style={{flex:1,fontSize:13,color:"#C8C4BE"}}>{b.name}{b.isCard&&<span style={{color:C.pink,marginLeft:4,fontSize:10}}>💳</span>}</span>{b.installments&&<span style={{fontSize:10,color:"#666",marginRight:6}}>C{cn}/{b.installments}</span>}<span style={{fontSize:10,color:"#555",marginRight:8}}>día {b.dueDay}</span><span style={{fontSize:14,fontFamily:"Georgia",color:"#EDE9E3"}}>{fmt(b.amount)}</span><button onClick={()=>startEditBill(b)} style={S.penBtn}>✏️</button></div>);})}
       </div>
       <div style={S.sec}>Gasto mensual — últimos 12 meses</div>
       <div style={{height:200,margin:"0 14px"}}>
@@ -894,6 +1088,7 @@ export default function App() {
   );
 
   // ══ HOME TAB ══
+  const recentTxns=[...txns].sort((a,b)=>new Date(b.date+"T12:00:00")-new Date(a.date+"T12:00:00")).slice(0,12);
   return(
     <div style={S.app(isMobile)}>
       {!isMobile&&<Sidebar/>}
@@ -917,6 +1112,8 @@ export default function App() {
       {(urgentRegular.length>0||resumenIsUrgent)&&(<div style={S.card()}><div style={{fontSize:11,letterSpacing:3,color:C.gold,textTransform:"uppercase",marginBottom:10}}>📅 Próximos vencimientos</div>{resumenIsUrgent&&prevResumenAmount>0&&(<div style={{...S.row,padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}><div style={S.eBox("rgba(232,122,206,0.12)")}>💳</div><div style={{flex:1}}><div style={{fontSize:14}}>Resumen {MONTHS_FULL[PM]}</div><div style={{fontSize:11,color:C.pink}}>Vence el {cardSettings.dueDay}</div></div><div style={{fontSize:15,fontFamily:"Georgia",color:C.pink}}>{fmt(prevResumenAmount)}</div></div>)}{urgentRegular.slice(0,4-(resumenIsUrgent?1:0)).map(b=>{const d=daysUntil(b.dueDay,CM,CY);return(<div key={b.id} style={{...S.row,padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}><div style={S.eBox("rgba(255,255,255,0.04)")}>{b.emoji}</div><div style={{flex:1}}><div style={{fontSize:14}}>{b.name}</div><div style={{fontSize:11,color:d<0?C.red:d<=1?"#E8844A":"#E8A45A"}}>{d<0?`⚠️ Venció hace ${Math.abs(d)}d`:d===0?"🔴 Hoy":d===1?"🟠 Mañana":`🟡 ${d}d`}</div></div><div style={{fontSize:15,fontFamily:"Georgia",color:C.red}}>{fmt(b.amount)}</div></div>);})}<button onClick={()=>setTab("bills")} style={{width:"100%",marginTop:10,padding:"8px",borderRadius:9,background:"transparent",border:"1px solid rgba(200,169,126,0.2)",color:C.gold,fontSize:12,cursor:"pointer",fontFamily:"Georgia"}}>Ver todos los pagos →</button></div>)}
       {accounts.some(a=>accountBalance(a.id)!==0)&&<><div style={S.sec}>Mis cuentas</div><div style={{display:"flex",gap:10,padding:"0 14px",overflowX:"auto",paddingBottom:6}}>{accounts.map(acc=>{const b=accountBalance(acc.id);const neg=b<0;return(<div key={acc.id} onClick={()=>setAccountDetail(acc.id)} style={{flexShrink:0,background:neg?"rgba(232,90,90,0.08)":"rgba(255,255,255,0.04)",border:`1px solid ${neg?"rgba(232,90,90,0.3)":acc.color+"33"}`,borderRadius:14,padding:"14px 16px",cursor:"pointer",minWidth:110}}><div style={{fontSize:18,marginBottom:4}}>{acc.emoji}</div><div style={{fontSize:11,color:"#666",marginBottom:4}}>{acc.name}</div><div style={{fontSize:16,fontFamily:"Georgia",color:neg?C.red:acc.color}}>{neg&&"−"}{fmt(Math.abs(b))}</div></div>);})}</div></>}
       <div style={S.card()}><div style={S.row}><span style={{fontSize:20}}>📋</span><div style={{flex:1}}><div style={{fontSize:11,color:"#888",marginBottom:2}}>Total gasto fijo mensual</div><div style={{fontSize:20,fontFamily:"Georgia",color:C.gold}}>{fmt(monthlyFixedTotal)}</div></div><button onClick={()=>setTab("insights")} style={{background:"none",border:"1px solid rgba(200,169,126,0.2)",borderRadius:8,padding:"6px 12px",color:C.gold,fontSize:11,cursor:"pointer"}}>Ver →</button></div></div>
+      {/* 🆕 ÚLTIMOS MOVIMIENTOS — todos los gastos/ingresos de una vez, editables y borrables */}
+      {txns.length>0&&<><div style={S.sec}>Últimos movimientos</div><div style={{padding:"0 14px"}}>{recentTxns.map(t=>{const cats=t.type==="gasto"?catsGasto:catsIngreso;const cat=cats.find(c=>c.name===t.category)||{emoji:"•",color:"#888"};const acc=accounts.find(a=>a.id===t.accountId);return(<div key={t.id} style={S.txRow}><div style={S.eBox(`${cat.color}18`)}>{cat.emoji}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}>{t.description||t.category}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>{acc?`${acc.emoji} ${acc.name}`:t.category} · {fmtDate(t.date)}{t.currency==="USD"&&<span style={{color:C.blue}}> · 🇺🇸</span>}</div></div><div style={{fontSize:15,fontFamily:"Georgia",color:t.type==="gasto"?C.red:C.green,flexShrink:0}}>{t.type==="gasto"?"−":"+"}{t.currency==="USD"?fmtUSD(t.amount):fmt(t.amount)}</div><button onClick={()=>startEditTxn(t)} style={S.penBtn}>✏️</button><button onClick={()=>delTxn(t.id)} style={S.xBtn}>×</button></div>);})}</div></>}
       <div style={{height:80}}/>
       <button style={S.fab} onClick={()=>setModal("txn")}>+</button>
       <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
