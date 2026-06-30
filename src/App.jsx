@@ -172,6 +172,7 @@ export default function App() {
   const [terceroDetail,setTerceroDetail]=useState(null);   // 🆕 persona abierta en el modal
   const [addSavId,setAddSavId]=useState(null);
   const [addSavAmt,setAddSavAmt]=useState("");
+  const [addSavAcc,setAddSavAcc]=useState("none"); // 🆕 cuenta de la que sale el ahorro ("none" = solo seguimiento)
   const [tempRate,setTempRate]=useState("");
   const [tempBudget,setTempBudget]=useState("");
   const [tempCard,setTempCard]=useState({closingDay:"",dueDay:""});
@@ -342,7 +343,7 @@ export default function App() {
     return base-debt;
   };
   // 🆕 nombre/emoji/color de cualquier entidad (cuenta real o persona)
-  const entityOf=(id)=>accounts.find(a=>a.id===id)||people.find(p=>p.id===id)||null;
+  const entityOf=(id)=>{ const sv=savings.find(s=>s.id===id); return accounts.find(a=>a.id===id)||people.find(p=>p.id===id)||(sv?{id:sv.id,name:sv.name,emoji:"🎯",color:"#C8A97E"}:null); };
   // 🆕 movimientos asociados a una entidad (cuenta real o persona), con dirección de impacto
   const entityMovements=(id)=>{
     const res=[];
@@ -564,7 +565,18 @@ export default function App() {
 
   // ── CRUD: Savings ──────────────────────────────────────────────────────────
   const addSaving=async()=>{ if(!savForm.name||!savForm.goal) return; const s={id:Date.now().toString(),name:savForm.name,goal:parseFloat(savForm.goal),saved:parseFloat(savForm.saved||0)}; const u=[...savings,s]; setSavings(u); await dbSave(KEYS.savings,u); await saveToFirestore({savings:JSON.stringify(u)}); doFlash(); closeModal(); };
-  const addToSaving=async()=>{ if(!addSavId||!addSavAmt) return; const u=savings.map(s=>s.id===addSavId?{...s,saved:s.saved+parseFloat(addSavAmt)}:s); setSavings(u); await dbSave(KEYS.savings,u); await saveToFirestore({savings:JSON.stringify(u)}); setAddSavId(null); setAddSavAmt(""); };
+  const addToSaving=async()=>{
+    if(!addSavId||!addSavAmt) return;
+    const amt=parseFloat(addSavAmt); if(!amt||amt<=0) return;
+    const u=savings.map(s=>s.id===addSavId?{...s,saved:s.saved+amt}:s);
+    setSavings(u); await dbSave(KEYS.savings,u); await saveToFirestore({savings:JSON.stringify(u)});
+    // 🆕 si se eligió una cuenta, el dinero sale de ahí (se registra como transferencia al ahorro, no como gasto)
+    if(addSavAcc&&addSavAcc!=="none"&&realIds.has(addSavAcc)){
+      const t={id:Date.now(),type:"transfer",fromId:addSavAcc,toId:addSavId,amount:amt,currency:"ARS",date:todayStr(),description:`Ahorro: ${savings.find(s=>s.id===addSavId)?.name||""}`};
+      const tu=[t,...txns]; setTxns(tu); await dbSave(KEYS.txns,tu); await saveToFirestore({txns:JSON.stringify(tu)});
+    }
+    setAddSavId(null); setAddSavAmt(""); setAddSavAcc("none");
+  };
   const delSaving=async id=>{ const u=savings.filter(s=>s.id!==id); setSavings(u); await dbSave(KEYS.savings,u); await saveToFirestore({savings:JSON.stringify(u)}); };
 
   // ── CRUD: Categories ───────────────────────────────────────────────────────
@@ -1324,7 +1336,7 @@ export default function App() {
         <div key={g.id} style={S.card()}>
           <div style={{...S.row,marginBottom:10}}><div style={{flex:1}}><div style={{fontSize:15}}>{g.name}</div><div style={{fontSize:12,color:"#666",marginTop:2}}>{fmt(g.saved)} de {fmt(g.goal)}</div></div><div style={{fontSize:20,fontFamily:"AppNums, Georgia",color:C.gold}}>{pct}%</div><button style={S.xBtn} onClick={()=>delSaving(g.id)}>×</button></div>
           <div style={{height:6,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden",marginBottom:10}}><div style={{height:"100%",width:`${pct}%`,background:`linear-gradient(90deg,${C.gold},#E8C89A)`,borderRadius:4}}/></div>
-          {isAdd?<div style={{display:"flex",gap:8}}><input style={{...S.inp,flex:1,padding:"10px 12px",fontSize:14}} type="number" placeholder="$ cuánto" value={addSavAmt} onChange={e=>setAddSavAmt(e.target.value)}/><button onClick={addToSaving} style={{padding:"10px 14px",borderRadius:10,background:C.gold,border:"none",color:C.bg,cursor:"pointer"}}>+</button><button onClick={()=>{setAddSavId(null);setAddSavAmt("");}} style={{padding:"10px",borderRadius:10,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",color:"#666",cursor:"pointer"}}>✕</button></div>:<button onClick={()=>setAddSavId(g.id)} style={{width:"100%",padding:"9px",borderRadius:10,background:"rgba(200,169,126,0.08)",border:"1px solid rgba(200,169,126,0.2)",color:C.gold,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>+ Agregar ahorro</button>}
+          {isAdd?<div style={{marginTop:4}}><input style={{...S.inp,padding:"10px 12px",fontSize:14,marginBottom:10}} type="number" placeholder="$ cuánto sumás" value={addSavAmt} onChange={e=>setAddSavAmt(e.target.value)}/><div style={{...S.lbl,marginBottom:7}}>¿De qué cuenta sale? (opcional)</div><AccPills selected={addSavAcc} onSelect={setAddSavAcc} showNone={true} exclude={["tarjeta"]}/><div style={{display:"flex",gap:8}}><button onClick={()=>{setAddSavId(null);setAddSavAmt("");setAddSavAcc("none");}} style={{flex:1,padding:"10px",borderRadius:10,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",color:"#666",cursor:"pointer",fontFamily:"AppNums, Georgia"}}>Cancelar</button><button onClick={addToSaving} style={{flex:2,padding:"10px 14px",borderRadius:10,background:C.gold,border:"none",color:C.bg,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>+ Sumar ahorro</button></div></div>:<button onClick={()=>{setAddSavAcc("none");setAddSavId(g.id);}} style={{width:"100%",padding:"9px",borderRadius:10,background:"rgba(200,169,126,0.08)",border:"1px solid rgba(200,169,126,0.2)",color:C.gold,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>+ Agregar ahorro</button>}
         </div>
       );})}
       {savings.length===0&&<div style={{textAlign:"center",padding:"10px 20px",color:"#444",fontSize:13}}>Sin metas todavía.</div>}
