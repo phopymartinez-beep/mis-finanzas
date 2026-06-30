@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { auth, provider, db } from "./firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
@@ -645,6 +645,136 @@ export default function App() {
     back:{background:"none",border:"none",color:C.gold,fontSize:22,cursor:"pointer"},
   };
   const NAV=[["home","🏠","Inicio"],["bills","📋","Pagos"],["accounts","💳","Cuentas"],["insights","📊","Análisis"]];
+  // ═══════════════ 🆕 RECORRIDO GUIADO + FELICITACIONES (bloque pegado aparte) ═══════════════
+  const [toursSeen,setToursSeen]=useState({});      // recorridos ya vistos, por pestaña
+  const [tour,setTour]=useState(null);              // recorrido activo {tab, step}
+  const [tourRect,setTourRect]=useState(null);      // posición del elemento resaltado
+  const [celebs,setCelebs]=useState({});            // felicitaciones ya mostradas
+  const [celebration,setCelebration]=useState(null);// {title, text} en pantalla
+  const _tourPrevLen=useRef(null);
+  const _tourArmed=useRef(false);
+
+  // carga lo ya visto (guardado por dispositivo)
+  useEffect(()=>{ (async()=>{ const ts=await dbLoad("fv6-tours-seen"); if(ts) setToursSeen(ts); const cl=await dbLoad("fv6-celebs"); if(cl) setCelebs(cl); })(); },[]);
+
+  // Contenido de cada recorrido. La cantidad de globitos depende de la pestaña.
+  const TOURS={
+    home:[
+      {sel:"home-balance",title:"Tu balance real 💰",text:"Este es el número más importante: lo que te queda de verdad después de los gastos y de lo que falta pagar."},
+      {sel:"home-accounts",title:"Tus cuentas de un vistazo 👀",text:"Acá ves el saldo de cada cuenta. Tocá cualquiera para ver todos sus movimientos."},
+      {sel:"home-fab",title:"Cargá tu primer movimiento ✏️",text:"Tocá el + para sumar un ingreso o un gasto. ¡Probemos ahora! Elegís cuenta, categoría y monto, y la app hace los números sola.",action:"openTxn"},
+    ],
+    bills:[
+      {sel:"bills-toggle",title:"Este mes y el próximo 📅",text:"Mirá lo que tenés que pagar este mes, o adelantate al que viene con un solo toque."},
+      {sel:"bills-resumen",title:"El resumen de tu tarjeta 💳",text:"Se arma solo con sus cuotas y compras. Cuando lo pagás, lo marcás y la app lo descuenta de tu cuenta."},
+      {sel:"bills-fab",title:"Sumá un gasto fijo ➕",text:"Con el + agregás alquiler, servicios, suscripciones… y la app te avisa cuándo vencen."},
+    ],
+    accounts:[
+      {sel:"acc-card",title:"El saldo de cada cuenta 💳",text:"Cada cuenta muestra su propio saldo. Tocala para ver el detalle de sus movimientos."},
+      {sel:"acc-savings",title:"Tus metas de ahorro 🎯",text:"Ponete objetivos (un viaje, una cámara…) y sumá de a poco. La app te muestra cuánto te falta."},
+      {sel:"acc-config",title:"Personalizá todo acá ⚙️",text:"Desde estos botones configurás tu tarjeta, el dólar, tu presupuesto, las categorías y los préstamos con otras personas."},
+      {sel:"acc-fab",title:"Creá una cuenta nueva ➕",text:"Con el + sumás todas las cuentas que uses: otro banco, una billetera virtual, lo que quieras."},
+    ],
+    insights:[
+      {sel:"ins-summary",title:"Tu resumen del mes 📊",text:"De un vistazo: cuánto entró, cuánto salió y cuánto te queda disponible."},
+      {sel:"ins-cats",title:"¿En qué se te va la plata? 🍕",text:"El gráfico ordena tus gastos por categoría, de mayor a menor. Ideal para detectar fugas."},
+      {sel:"ins-chart",title:"Tu historia de 12 meses 📈",text:"Compará cuánto gastaste mes a mes y fijate si vas mejorando."},
+    ],
+  };
+
+  const celebrate=(title,text)=>{ setCelebration({title,text}); setTimeout(()=>setCelebration(null),3400); };
+  const markCeleb=(k)=>{ const next={...celebs,[k]:true}; setCelebs(next); dbSave("fv6-celebs",next); saveToFirestore({celebs:JSON.stringify(next)}); };
+  const markTourSeen=(tabKey)=>{
+    const next={...toursSeen,[tabKey]:true};
+    setToursSeen(next); dbSave("fv6-tours-seen",next); saveToFirestore({toursSeen:JSON.stringify(next)});
+    if(["home","bills","accounts","insights"].every(k=>next[k]) && !celebs.tour){ markCeleb("tour"); celebrate("¡Completaste el recorrido! 🎉","Ya conocés todas las secciones. La app es toda tuya."); }
+  };
+
+  // Felicitación por el PRIMER movimiento (no hace falta tocar addTxn)
+  useEffect(()=>{
+    if(loading) return;
+    if(_tourPrevLen.current===null){ _tourPrevLen.current=txns.length; setTimeout(()=>{_tourArmed.current=true;},1600); return; }
+    const was=_tourPrevLen.current; _tourPrevLen.current=txns.length;
+    if(_tourArmed.current && was===0 && txns.length>0 && !celebs.first){ markCeleb("first"); celebrate("¡Tu primer movimiento! 🎉","Ya empezaste a llevar el control de tu plata. Seguí cargando y la app hace los números por vos."); }
+  },[txns,loading]); // eslint-disable-line
+
+  // Arranca el recorrido la primera vez que se abre cada pestaña
+  useEffect(()=>{
+    if(loading||!onboardingSeen||tour||accountDetail||modal||celebration) return;
+    if(!TOURS[tab]||toursSeen[tab]) return;
+    const id=setTimeout(()=>setTour({tab,step:0}),550);
+    return ()=>clearTimeout(id);
+  },[tab,loading,onboardingSeen,toursSeen,tour,accountDetail,modal,celebration]); // eslint-disable-line
+
+  // Mide el elemento resaltado y lo sigue al hacer scroll. Si el elemento no existe, salta ese globito.
+  useEffect(()=>{
+    if(!tour){ setTourRect(null); return; }
+    const steps=TOURS[tour.tab]||[]; const step=steps[tour.step];
+    if(!step){ setTourRect(null); return; }
+    let cancelled=false;
+    const locate=()=>document.querySelector(`[data-tour="${step.sel}"]`);
+    if(!locate()){
+      const id=setTimeout(()=>{ if(cancelled) return; if(!locate()){ if(tour.step<steps.length-1) setTour(tt=>({...tt,step:tt.step+1})); else { markTourSeen(tour.tab); setTour(null); } } },280);
+      return ()=>{ cancelled=true; clearTimeout(id); };
+    }
+    locate().scrollIntoView({block:"center",behavior:"smooth"});
+    const read=()=>{ const el=locate(); if(el){ const r=el.getBoundingClientRect(); setTourRect({top:r.top,left:r.left,width:r.width,height:r.height}); } };
+    const id=setTimeout(read,160);
+    window.addEventListener("resize",read); window.addEventListener("scroll",read,true);
+    return ()=>{ cancelled=true; clearTimeout(id); window.removeEventListener("resize",read); window.removeEventListener("scroll",read,true); };
+  },[tour]); // eslint-disable-line
+
+  // Globito + flecha + spotlight (pantalla en tenue menos lo resaltado)
+  const renderTour=()=>{
+    if(!tour) return null;
+    const steps=TOURS[tour.tab]||[]; const step=steps[tour.step]; if(!step) return null;
+    const total=steps.length; const isLast=tour.step===total-1; const r=tourRect; const pad=10;
+    const vw=window.innerWidth, vh=window.innerHeight;
+    const below=r?(r.top+r.height/2<vh*0.46):true;
+    const cx=r?(r.left+r.width/2):vw/2;
+    const tipW=Math.min(300,vw-24);
+    const tLeft=Math.min(Math.max(cx-tipW/2,12),vw-tipW-12);
+    const arrowLeft=Math.min(Math.max(cx-tLeft,26),tipW-26);
+    const tipStyle=r?(below?{top:r.top+r.height+pad+12,left:tLeft}:{top:r.top-pad-12,left:tLeft,transform:"translateY(-100%)"}):{top:vh*0.36,left:tLeft};
+    const goNext=()=>{ if(isLast){ const act=step.action; markTourSeen(tour.tab); setTour(null); if(act==="openTxn"){ setAddType("gasto"); setTxnForm(emptyTxn); setModal("txn"); } } else setTour(tt=>({...tt,step:tt.step+1})); };
+    const skip=()=>{ markTourSeen(tour.tab); setTour(null); };
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:300}}>
+        <div onClick={goNext} style={{position:"fixed",inset:0,cursor:"pointer"}}/>
+        {r&&<div style={{position:"fixed",top:r.top-pad,left:r.left-pad,width:r.width+pad*2,height:r.height+pad*2,borderRadius:14,boxShadow:`0 0 0 9999px rgba(8,8,12,0.84), 0 0 22px ${C.gold}`,border:`2px solid ${C.gold}`,pointerEvents:"none",transition:"all 0.25s ease",zIndex:301}}/>}
+        {!r&&<div style={{position:"fixed",inset:0,background:"rgba(8,8,12,0.84)",pointerEvents:"none",zIndex:301}}/>}
+        <div onClick={e=>e.stopPropagation()} style={{position:"fixed",...tipStyle,width:tipW,background:"linear-gradient(135deg,#1F1608,#281C0A)",border:"1px solid rgba(200,169,126,0.4)",borderRadius:16,padding:"16px 18px 14px",boxShadow:"0 16px 50px rgba(0,0,0,0.6)",zIndex:303,fontFamily:"AppNums, Georgia, serif"}}>
+          {r&&<div style={{position:"absolute",left:arrowLeft-7,width:14,height:14,background:"#1F1608",transform:"rotate(45deg)",...(below?{top:-8,borderLeft:"1px solid rgba(200,169,126,0.4)",borderTop:"1px solid rgba(200,169,126,0.4)"}:{bottom:-8,borderRight:"1px solid rgba(200,169,126,0.4)",borderBottom:"1px solid rgba(200,169,126,0.4)"})}}/>}
+          <div style={{fontSize:10,letterSpacing:3,color:C.gold,textTransform:"uppercase",marginBottom:7}}>{tour.step+1} / {total}</div>
+          <div style={{fontSize:17,color:C.text,marginBottom:7,lineHeight:1.3}}>{step.title}</div>
+          <div style={{fontSize:13.5,color:"#B8AE9E",lineHeight:1.7,marginBottom:16}}>{step.text}</div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <button onClick={skip} style={{background:"none",border:"none",color:"#6A6356",fontSize:12,cursor:"pointer",fontFamily:"AppNums, Georgia, serif"}}>Saltar</button>
+            <div style={{flex:1,display:"flex",gap:5,justifyContent:"center"}}>{steps.map((_,i)=><div key={i} style={{width:i===tour.step?18:7,height:7,borderRadius:4,background:i===tour.step?C.gold:"rgba(200,169,126,0.3)",transition:"width 0.2s"}}/>)}</div>
+            <button onClick={goNext} style={{padding:"9px 16px",borderRadius:11,background:C.gold,border:"none",color:C.bg,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia, serif"}}>{isLast?(step.action==="openTxn"?"Cargar ✏️":"Listo ✓"):"Siguiente →"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Cartel de felicitación con confeti
+  const renderCelebration=()=>{
+    if(!celebration) return null;
+    const cols=[C.gold,C.green,C.pink,C.blue,C.purple];
+    return(
+      <div style={{position:"fixed",inset:0,zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",fontFamily:"AppNums, Georgia, serif"}}>
+        <style>{`@keyframes celebPop{0%{transform:scale(.7);opacity:0}55%{transform:scale(1.05)}100%{transform:scale(1);opacity:1}}@keyframes confFall{0%{transform:translateY(-30px) rotate(0);opacity:1}100%{transform:translateY(62vh) rotate(420deg);opacity:0}}`}</style>
+        {Array.from({length:18}).map((_,i)=><div key={i} style={{position:"absolute",top:"16%",left:`${4+i*5.3}%`,width:9,height:14,background:cols[i%cols.length],borderRadius:2,animation:`confFall ${1.4+(i%5)*0.22}s ease-in ${(i%4)*0.12}s forwards`}}/>)}
+        <div style={{animation:"celebPop 0.4s ease-out forwards",background:"linear-gradient(135deg,#1A1208,#221808)",border:`1px solid ${C.gold}55`,borderRadius:22,padding:"30px 28px",textAlign:"center",maxWidth:320,margin:"0 24px",boxShadow:"0 20px 60px rgba(0,0,0,0.6)"}}>
+          <div style={{fontSize:54,marginBottom:10}}>🎉</div>
+          <div style={{fontSize:21,color:C.text,marginBottom:10,lineHeight:1.3}}>{celebration.title}</div>
+          <div style={{fontSize:14,color:"#9A9286",lineHeight:1.7}}>{celebration.text}</div>
+        </div>
+      </div>
+    );
+  };
+  // ════════════════════════════ fin del bloque pegado ════════════════════════════
 
   const dayBadge=(dueDay,done,m,y)=>{
     if(done) return <span style={{fontSize:10,color:C.green}}>✓ Pagado</span>;
@@ -1065,8 +1195,9 @@ export default function App() {
       <div style={S.app(isMobile)}>
         {!isMobile&&<Sidebar/>}
         <div style={isMobile?{}:S.content}>
+          {renderTour()}{renderCelebration()}
         <div style={S.hdr}><div style={S.ey}>Compromisos</div><h1 style={S.h1}>{MONTHS_FULL[viewM]} {viewY}</h1></div>
-        <div style={{display:"flex",gap:10,padding:"12px 14px 0"}}>
+        <div data-tour="bills-toggle" style={{display:"flex",gap:10,padding:"12px 14px 0"}}>
           <button onClick={()=>setBillsView("current")} style={{...S.tBtn(viewCurr,C.gold),flex:1}}>Este mes ({MONTHS_ES[CM]})</button>
           <button onClick={()=>setBillsView("next")} style={{...S.tBtn(!viewCurr,C.blue),flex:1}}>Próximo ({MONTHS_ES[NM]}) →</button>
         </div>
@@ -1079,7 +1210,7 @@ export default function App() {
           </div>
         </div>
         {viewCurr&&(urgentRegular.length>0||resumenIsUrgent)&&(<div style={S.alertC}><div style={{fontSize:11,letterSpacing:3,color:C.red,textTransform:"uppercase",marginBottom:8}}>⚠️ Vencidos / próximos</div>{resumenIsUrgent&&<div style={{...S.row,marginBottom:6}}><span style={{fontSize:16}}>💳</span><span style={{fontSize:14,flex:1}}>Resumen {rMonthLabel}</span><span style={{fontSize:11,fontWeight:"bold",color:rDaysLeft<0?C.red:"#E8844A"}}>{rDaysLeft<0?`Venció hace ${Math.abs(rDaysLeft)}d`:rDaysLeft===0?"¡HOY!":rDaysLeft===1?"Mañana":`${rDaysLeft}d`}</span><span style={{fontSize:14,color:C.pink,fontFamily:"AppNums, Georgia",marginLeft:6}}>{fmt(rAmount)}</span></div>}{urgentRegular.map(b=>{const d=daysUntil(b.dueDay,CM,CY);return(<div key={b.id} style={{...S.row,marginBottom:6}}><span style={{fontSize:16}}>{b.emoji}</span><span style={{fontSize:14,flex:1}}>{b.name}</span><span style={{fontSize:11,fontWeight:"bold",color:d<0?C.red:"#E8844A"}}>{d<0?`Venció hace ${Math.abs(d)}d`:d===0?"¡HOY!":d===1?"Mañana":`${d}d`}</span><span style={{fontSize:14,color:C.red,fontFamily:"AppNums, Georgia",marginLeft:6}}>{fmt(b.amount)}</span></div>);})}</div>)}
-        <div style={S.sec}>💳 Resumen Tarjeta {rMonthLabel}</div>
+        <div data-tour="bills-resumen" style={S.sec}>💳 Resumen Tarjeta {rMonthLabel}</div>
         <div style={{padding:"0 14px"}}>
           <div style={{background:rPaid?"rgba(90,232,154,0.04)":"rgba(232,122,206,0.06)",border:`1px solid ${rPaid?"rgba(90,232,154,0.2)":"rgba(232,122,206,0.25)"}`,borderRadius:16,overflow:"hidden"}}>
             <div style={{...S.row,padding:"14px 16px",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
@@ -1132,7 +1263,7 @@ export default function App() {
             );
           })}
         </div>
-        <button style={S.fab} onClick={()=>setModal("bill")}>+</button>
+        <button data-tour="bills-fab" style={S.fab} onClick={()=>setModal("bill")}>+</button>
         <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
         {!isMobile&&<div/>}
         </div>
@@ -1145,11 +1276,12 @@ export default function App() {
     <div style={S.app(isMobile)}>
       {!isMobile&&<Sidebar/>}
       <div style={isMobile?{}:S.content}>
+        {renderTour()}{renderCelebration()}
       <div style={S.hdr}><div style={S.ey}>Mis cuentas</div><h1 style={S.h1}>Balance por cuenta</h1></div>
       {accounts.map(acc=>{
         const bal=accountBalance(acc.id); const neg=bal<0; const isTarjeta=acc.id==="tarjeta";
         return(
-          <div key={acc.id} style={{...S.gCard(),borderColor:neg?"rgba(232,90,90,0.4)":isTarjeta?"rgba(232,122,206,0.35)":"rgba(200,169,126,0.25)",background:neg?"linear-gradient(135deg,#1A0808,#220D0D)":isTarjeta?"linear-gradient(135deg,#150818,#1A0D20)":"linear-gradient(135deg,#1A1208,#221808)"}}>
+          <div key={acc.id} data-tour={acc.id===accounts[0]?.id?"acc-card":undefined} style={{...S.gCard(),borderColor:neg?"rgba(232,90,90,0.4)":isTarjeta?"rgba(232,122,206,0.35)":"rgba(200,169,126,0.25)",background:neg?"linear-gradient(135deg,#1A0808,#220D0D)":isTarjeta?"linear-gradient(135deg,#150818,#1A0D20)":"linear-gradient(135deg,#1A1208,#221808)"}}>
             <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
               <div style={{width:46,height:46,borderRadius:13,background:`${acc.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0,cursor:"pointer"}} onClick={()=>setAccountDetail(acc.id)}>{acc.emoji}</div>
               <div style={{flex:1,cursor:"pointer"}} onClick={()=>setAccountDetail(acc.id)}>
@@ -1176,7 +1308,7 @@ export default function App() {
           </div>
         );
       })}
-      <div style={S.sec}>Metas de ahorro</div>
+      <div data-tour="acc-savings" style={S.sec}>Metas de ahorro</div>
       {savings.map(g=>{ const pct=Math.min(100,Math.round((g.saved/g.goal)*100)); const isAdd=addSavId===g.id; return(
         <div key={g.id} style={S.card()}>
           <div style={{...S.row,marginBottom:10}}><div style={{flex:1}}><div style={{fontSize:15}}>{g.name}</div><div style={{fontSize:12,color:"#666",marginTop:2}}>{fmt(g.saved)} de {fmt(g.goal)}</div></div><div style={{fontSize:20,fontFamily:"AppNums, Georgia",color:C.gold}}>{pct}%</div><button style={S.xBtn} onClick={()=>delSaving(g.id)}>×</button></div>
@@ -1192,12 +1324,12 @@ export default function App() {
         [()=>{setTempRate(String(usdRate));setModal("usd");},"rgba(90,155,232,0.07)","rgba(90,155,232,0.2)",C.blue,`🇺🇸 TC dólar: $${usdRate.toLocaleString("es-AR")}/US$`],
         [()=>{setTempBudget(String(budget));setModal("budget");},"rgba(90,232,154,0.07)","rgba(90,232,154,0.2)",C.green,`🎯 Presupuesto: ${budget>0?fmt(budget):"No configurado"}`],
         [()=>{setTerceroDetail(null);setModal("terceros");},"rgba(232,122,206,0.05)","rgba(232,122,206,0.2)",C.pink,`👥 Cuentas de terceros${people.length>0?` (${people.length})`:""}`],
-      ].map(([fn,bg,border,col,label],i)=>(<div key={i} style={{margin:"6px 14px"}}><button onClick={fn} style={{width:"100%",padding:12,borderRadius:12,background:bg,border:`1px solid ${border}`,color:col,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>{label}</button></div>))}
+      ].map(([fn,bg,border,col,label],i)=>(<div key={i} data-tour={i===0?"acc-config":undefined} style={{margin:"6px 14px"}}><button onClick={fn} style={{width:"100%",padding:12,borderRadius:12,background:bg,border:`1px solid ${border}`,color:col,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>{label}</button></div>))}
       {/* 🆕 GATILLO OCULTO DE REINICIO — tocá 7 veces "v6.0" para abrir la zona de peligro */}
       <div style={{textAlign:"center",padding:"30px 0 90px"}}>
         <span onClick={()=>{const n=resetTaps+1;setResetTaps(n);if(n>=7){setResetTaps(0);setModal("reset");}}} style={{fontSize:10,color:"#1B1B23",userSelect:"none",letterSpacing:3,cursor:"default"}}>v6.0</span>
       </div>
-      <button style={S.fab} onClick={()=>setModal("account")}>+</button>
+      <button data-tour="acc-fab" style={S.fab} onClick={()=>setModal("account")}>+</button>
       <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
       </div>
     </div>
@@ -1208,21 +1340,22 @@ export default function App() {
     <div style={S.app(isMobile)}>
       {!isMobile&&<Sidebar/>}
       <div style={isMobile?{}:S.content}>
+        {renderTour()}{renderCelebration()}
       <div style={S.hdr}><div style={S.ey}>Análisis</div><h1 style={S.h1}>¿A dónde va tu plata?</h1></div>
       <div style={S.gCard()}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+        <div data-tour="ins-summary" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
           {[["Ingresos",C.green,fmt(totalIn)],["Gastos",C.red,fmt(totalOut)],["Disponible",txnBalance>=0?C.gold:C.red,fmt(txnBalance)]].map(([l,c,v])=>(<div key={l}><div style={{fontSize:9,letterSpacing:2,color:c,textTransform:"uppercase",marginBottom:4}}>{l}</div><div style={{fontSize:14,color:c,fontFamily:"AppNums, Georgia"}}>{v}</div></div>))}
         </div>
       </div>
       {budget>0&&(<div style={{...S.card(),background:budgetPct>=100?"rgba(232,90,90,0.07)":"rgba(90,232,154,0.05)",border:`1px solid ${budgetPct>=100?"rgba(232,90,90,0.25)":"rgba(90,232,154,0.2)"}`}}><div style={{...S.row,marginBottom:10}}><div style={{flex:1}}><div style={{fontSize:11,color:budgetPct>=100?C.red:C.green,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>🎯 Presupuesto mensual</div><div style={{fontSize:13,color:"#888"}}>{fmt(thisMonthSpend)} de {fmt(budget)}</div></div><div style={{fontSize:22,fontFamily:"AppNums, Georgia",color:budgetPct>=100?C.red:C.gold}}>{budgetPct}%</div></div><div style={{height:8,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(100,budgetPct)}%`,background:budgetPct>=100?`linear-gradient(90deg,${C.red},#FF8080)`:`linear-gradient(90deg,${C.green},#8BC34A)`,borderRadius:4}}/></div>{budgetPct>=90&&<div style={{fontSize:12,color:C.red,marginTop:8}}>{budgetPct>=100?"⚠️ Superaste el presupuesto":"⏰ Cerca del límite"}</div>}</div>)}
-      <div style={S.sec}>Gastos por categoría</div>
+      <div data-tour="ins-cats" style={S.sec}>Gastos por categoría</div>
       {gatosCatData.length>0?(<><div style={{height:180,margin:"0 14px"}}><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={gatosCatData} dataKey="total" nameKey="name" cx="50%" cy="50%" outerRadius={74} innerRadius={34}>{gatosCatData.map((c,i)=><Cell key={i} fill={c.color}/>)}</Pie><Tooltip formatter={v=>fmt(v)} contentStyle={{background:"#1A1A24",border:"1px solid #333",borderRadius:8,color:"#EDE9E3",fontFamily:"AppNums, Georgia"}}/></PieChart></ResponsiveContainer></div><div style={{padding:"0 14px"}}>{gatosCatData.map(c=>(<div key={c.name} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><div style={{width:9,height:9,borderRadius:"50%",background:c.color}}/><span style={{fontSize:16}}>{c.emoji}</span><span style={{flex:1,fontSize:13,color:"#C8C4BE"}}>{c.name}</span><span style={{fontSize:14,fontFamily:"AppNums, Georgia",color:C.red}}>{fmt(c.total)}</span><span style={{fontSize:10,color:"#444",minWidth:32,textAlign:"right"}}>{totalOut>0?Math.round(c.total/totalOut*100):0}%</span></div>))}</div></>):<div style={{textAlign:"center",padding:"20px",color:"#444",fontSize:13}}>Registrá gastos para ver el análisis por categoría.</div>}
       <div style={S.sec}>📋 Compromisos fijos mensuales</div>
       <div style={S.card()}>
         <div style={{...S.row,marginBottom:12,paddingBottom:10,borderBottom:"1px solid rgba(255,255,255,0.07)"}}><span style={{flex:1,fontSize:13,color:"#888"}}>Total comprometido por mes</span><span style={{fontSize:20,fontFamily:"AppNums, Georgia",color:C.gold}}>{fmt(monthlyFixedTotal)}</span></div>
         {bills.filter(b=>{ if(b.isCard) return isCardBillActiveInMonth(b,CM,CY)||isCardBillActiveInMonth(b,PM,PY); return (b.installments===null||b.installmentCurrent<=b.installments)&&recurringActive(b,CM,CY); }).sort((a,b2)=>a.dueDay-b2.dueDay).map(b=>{const cn=b.isCard&&Array.isArray(b.schedule)?(getInstallmentNumber(b,CM,CY)||getInstallmentNumber(b,PM,PY)):b.installmentCurrent;return(<div key={b.id} style={{...S.row,padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>{b.emoji}</span><span style={{flex:1,fontSize:13,color:"#C8C4BE"}}>{b.name}{b.isCard&&<span style={{color:C.pink,marginLeft:4,fontSize:10}}>💳</span>}</span>{b.installments&&<span style={{fontSize:10,color:"#666",marginRight:6}}>C{cn}/{b.installments}</span>}<span style={{fontSize:10,color:"#555",marginRight:8}}>día {b.dueDay}</span><span style={{fontSize:14,fontFamily:"AppNums, Georgia",color:"#EDE9E3"}}>{fmt(b.amount)}</span><button onClick={()=>startEditBill(b)} style={S.penBtn}>✏️</button></div>);})}
       </div>
-      <div style={S.sec}>Gasto mensual — últimos 12 meses</div>
+      <div data-tour="ins-chart" style={S.sec}>Gasto mensual — últimos 12 meses</div>
       <div style={{height:200,margin:"0 14px"}}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={monthlyChartData} margin={{top:5,right:5,left:0,bottom:5}}>
@@ -1251,12 +1384,13 @@ export default function App() {
     <div style={S.app(isMobile)}>
       {!isMobile&&<Sidebar/>}
       <div style={isMobile?{}:S.content}>
+        {renderTour()}{renderCelebration()}
       <div style={{...S.hdr,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div><div style={S.ey}>Mis finanzas · {MONTHS_FULL[CM]}</div><h1 style={S.h1}>Hola{firstName?`, ${firstName}`:""} 👋</h1></div>
       </div>
       <div style={S.gCard()}>
         <div style={S.ey}>Balance real disponible</div>
-        <div style={{fontSize:34,color:realBalance>=0?C.gold:C.red,margin:"6px 0 4px",fontFamily:"AppNums, Georgia"}}>{fmt(realBalance)}</div>
+        <div data-tour="home-balance" style={{fontSize:34,color:realBalance>=0?C.gold:C.red,margin:"6px 0 4px",fontFamily:"AppNums, Georgia"}}>{fmt(realBalance)}</div>
         <div style={{fontSize:10,color:"#555",marginBottom:14}}>ingresos − gastos − compromisos pendientes</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
           <div><div style={{fontSize:9,color:C.green,letterSpacing:2,textTransform:"uppercase",marginBottom:3}}>Ingresos</div><div style={{fontSize:18,color:C.green,fontFamily:"AppNums, Georgia"}}>{fmt(totalIn)}</div></div>
@@ -1268,12 +1402,12 @@ export default function App() {
       {prevResumenPaid&&currAccumulating>0&&(<div style={{...S.card(),background:"rgba(90,232,154,0.05)",border:"1px solid rgba(90,232,154,0.15)"}}><div style={S.row}><span style={{fontSize:20}}>✅</span><div style={{flex:1}}><div style={{fontSize:13,color:C.green}}>Resumen {MONTHS_FULL[PM]} pagado</div><div style={{fontSize:11,color:"#666",marginTop:2}}>Acumulando {MONTHS_FULL[CM]}: {fmt(currAccumulating)} → vence {cardSettings.dueDay}/{NM+1}</div></div></div></div>)}
       {pendingRegularBills.length>0&&(<div style={S.alertC}><div style={{...S.row,marginBottom:6}}><span style={{fontSize:11,color:C.red,letterSpacing:2,textTransform:"uppercase",flex:1}}>⚠️ Gastos fijos pendientes</span><button onClick={()=>setTab("bills")} style={{background:"none",border:"1px solid rgba(232,90,90,0.3)",borderRadius:7,padding:"4px 10px",color:C.red,fontSize:11,cursor:"pointer"}}>Ver →</button></div><div style={{fontSize:22,color:C.red,fontFamily:"AppNums, Georgia"}}>{fmt(pendingRegularBills.reduce((s,b)=>s+b.amount,0))}</div><div style={{fontSize:11,color:"#7A4040",marginTop:2}}>{pendingRegularBills.length} pagos pendientes este mes</div></div>)}
       {(urgentRegular.length>0||resumenIsUrgent)&&(<div style={S.card()}><div style={{fontSize:11,letterSpacing:3,color:C.gold,textTransform:"uppercase",marginBottom:10}}>📅 Próximos vencimientos</div>{resumenIsUrgent&&prevResumenAmount>0&&(<div style={{...S.row,padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}><div style={S.eBox("rgba(232,122,206,0.12)")}>💳</div><div style={{flex:1}}><div style={{fontSize:14}}>Resumen {MONTHS_FULL[PM]}</div><div style={{fontSize:11,color:C.pink}}>Vence el {cardSettings.dueDay}</div></div><div style={{fontSize:15,fontFamily:"AppNums, Georgia",color:C.pink}}>{fmt(prevResumenAmount)}</div></div>)}{urgentRegular.slice(0,4-(resumenIsUrgent?1:0)).map(b=>{const d=daysUntil(b.dueDay,CM,CY);return(<div key={b.id} style={{...S.row,padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}><div style={S.eBox("rgba(255,255,255,0.04)")}>{b.emoji}</div><div style={{flex:1}}><div style={{fontSize:14}}>{b.name}</div><div style={{fontSize:11,color:d<0?C.red:d<=1?"#E8844A":"#E8A45A"}}>{d<0?`⚠️ Venció hace ${Math.abs(d)}d`:d===0?"🔴 Hoy":d===1?"🟠 Mañana":`🟡 ${d}d`}</div></div><div style={{fontSize:15,fontFamily:"AppNums, Georgia",color:C.red}}>{fmt(b.amount)}</div></div>);})}<button onClick={()=>setTab("bills")} style={{width:"100%",marginTop:10,padding:"8px",borderRadius:9,background:"transparent",border:"1px solid rgba(200,169,126,0.2)",color:C.gold,fontSize:12,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>Ver todos los pagos →</button></div>)}
-      {accounts.some(a=>accountBalance(a.id)!==0)&&<><div style={S.sec}>Mis cuentas</div><div style={{display:"flex",gap:10,padding:"0 14px",overflowX:"auto",paddingBottom:6}}>{accounts.map(acc=>{const b=accountBalance(acc.id);const neg=b<0;return(<div key={acc.id} onClick={()=>setAccountDetail(acc.id)} style={{flexShrink:0,background:neg?"rgba(232,90,90,0.08)":"rgba(255,255,255,0.04)",border:`1px solid ${neg?"rgba(232,90,90,0.3)":acc.color+"33"}`,borderRadius:14,padding:"14px 16px",cursor:"pointer",minWidth:110}}><div style={{fontSize:18,marginBottom:4}}>{acc.emoji}</div><div style={{fontSize:11,color:"#666",marginBottom:4}}>{acc.name}</div><div style={{fontSize:16,fontFamily:"AppNums, Georgia",color:neg?C.red:acc.color}}>{neg&&"−"}{fmt(Math.abs(b))}</div></div>);})}</div></>}
+      {accounts.some(a=>accountBalance(a.id)!==0)&&<><div data-tour="home-accounts" style={S.sec}>Mis cuentas</div><div style={{display:"flex",gap:10,padding:"0 14px",overflowX:"auto",paddingBottom:6}}>{accounts.map(acc=>{const b=accountBalance(acc.id);const neg=b<0;return(<div key={acc.id} onClick={()=>setAccountDetail(acc.id)} style={{flexShrink:0,background:neg?"rgba(232,90,90,0.08)":"rgba(255,255,255,0.04)",border:`1px solid ${neg?"rgba(232,90,90,0.3)":acc.color+"33"}`,borderRadius:14,padding:"14px 16px",cursor:"pointer",minWidth:110}}><div style={{fontSize:18,marginBottom:4}}>{acc.emoji}</div><div style={{fontSize:11,color:"#666",marginBottom:4}}>{acc.name}</div><div style={{fontSize:16,fontFamily:"AppNums, Georgia",color:neg?C.red:acc.color}}>{neg&&"−"}{fmt(Math.abs(b))}</div></div>);})}</div></>}
       <div style={S.card()}><div style={S.row}><span style={{fontSize:20}}>📋</span><div style={{flex:1}}><div style={{fontSize:11,color:"#888",marginBottom:2}}>Total gasto fijo mensual</div><div style={{fontSize:20,fontFamily:"AppNums, Georgia",color:C.gold}}>{fmt(monthlyFixedTotal)}</div></div><button onClick={()=>setTab("insights")} style={{background:"none",border:"1px solid rgba(200,169,126,0.2)",borderRadius:8,padding:"6px 12px",color:C.gold,fontSize:11,cursor:"pointer"}}>Ver →</button></div></div>
       {/* 🆕 ÚLTIMOS MOVIMIENTOS — todos los gastos/ingresos de una vez, editables y borrables */}
       {txns.length>0&&<><div style={S.sec}>Últimos movimientos</div><div style={{padding:"0 14px"}}>{recentTxns.map(t=>{const isT=t.type==="transfer";const cat=isT?{emoji:"🔄",color:C.blue}:(t.type==="gasto"?catsGasto:catsIngreso).find(c=>c.name===t.category)||{emoji:"•",color:"#888"};const acc=entityOf(t.accountId);const fromE=isT?entityOf(t.fromId):null;const toE=isT?entityOf(t.toId):null;return(<div key={t.id} style={S.txRow}><div style={S.eBox(`${cat.color}18`)}>{cat.emoji}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}>{isT?(t.description||`${fromE?fromE.name:"?"} → ${toE?toE.name:"?"}`):(t.description||t.category)}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>{isT?`${fromE?fromE.emoji+" "+fromE.name:"?"} → ${toE?toE.emoji+" "+toE.name:"?"}`:(acc?`${acc.emoji} ${acc.name}`:t.category)} · {fmtDate(t.date)}{t.currency==="USD"&&<span style={{color:C.blue}}> · 🇺🇸</span>}</div></div><div style={{fontSize:15,fontFamily:"AppNums, Georgia",color:isT?C.blue:(t.type==="gasto"?C.red:C.green),flexShrink:0}}>{isT?"":t.type==="gasto"?"−":"+"}{t.currency==="USD"?fmtUSD(t.amount):fmt(t.amount)}</div>{!isT&&<button onClick={()=>startEditTxn(t)} style={S.penBtn}>✏️</button>}<button onClick={()=>delTxn(t.id)} style={S.xBtn}>×</button></div>);})}</div></>}
       <div style={{height:80}}/>
-      <button style={S.fab} onClick={()=>setModal("txn")}>+</button>
+      <button data-tour="home-fab" style={S.fab} onClick={()=>setModal("txn")}>+</button>
       <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>setTab(t)}><span>{e}</span>{l}</button>)}</div>
       </div>
     </div>
