@@ -53,7 +53,7 @@ const KEYS = {
   usdRate:"fv6-usdrate", budget:"fv6-budget",
   cardSettings:"fv6-card", cardResumen:"fv6-resumen",
   catsGasto:"fv6-cats-gasto", catsIngreso:"fv6-cats-ingreso",
-  people:"fv6-people", tercerosSeen:"fv6-terceros-seen",
+  people:"fv6-people", tercerosSeen:"fv6-terceros-seen", onboardingSeen:"fv6-onboarding-seen",
 };
 const EMOJIS_BILL = ["📋","🏠","💡","📱","🚗","💊","🎓","🛒","💈","🏋️","📺","🌐","🎵","🍕","🔥","🛡️","🖼️","🎬","🏰","🤖","🎨","✂️","🐾","✈️","🎮"];
 const EMOJIS_ACC  = ["💼","🎨","💵","🏦","💳","🏠","📱","🚗","💡","🎓","🛒","✨","💎","🌟"];
@@ -91,6 +91,8 @@ export default function App() {
   const [cardSettings,setCardSettings]=useState({closingDay:25,dueDay:1});
   const [people,setPeople]=useState([]); // 🆕 cuentas de terceros
   const [tercerosSeen,setTercerosSeen]=useState(false); // 🆕 ya vio el intro
+  const [onboardingSeen,setOnboardingSeen]=useState(false); // 🆕 ya vio el onboarding de primer uso
+  const [onboardingStep,setOnboardingStep]=useState(0);     // 🆕 paso actual del onboarding
   const [loading,setLoading]=useState(true);
   const [isMobile,setIsMobile]=useState(window.innerWidth<900);
   const [user,setUser]=useState(null);
@@ -122,7 +124,7 @@ export default function App() {
           if(d.catsGasto)    setCatsGasto(JSON.parse(d.catsGasto));
           if(d.catsIngreso)  setCatsIngreso(JSON.parse(d.catsIngreso));
           if(d.people)       setPeople(JSON.parse(d.people));
-          if(d.tercerosSeen) setTercerosSeen(JSON.parse(d.tercerosSeen));
+          if(d.onboardingSeen) setOnboardingSeen(JSON.parse(d.onboardingSeen));
         }
       }
     });
@@ -172,16 +174,16 @@ export default function App() {
 
   useEffect(()=>{
     (async()=>{
-      const [t,b,p,a,s,r,bg,cs,cr,cg,ci,pe,ts]=await Promise.all([
+      const [t,b,p,a,s,r,bg,cs,cr,cg,ci,pe,ts,ob]=await Promise.all([
         dbLoad(KEYS.txns),dbLoad(KEYS.bills),dbLoad(KEYS.paid),dbLoad(KEYS.accounts),
         dbLoad(KEYS.savings),dbLoad(KEYS.usdRate),dbLoad(KEYS.budget),dbLoad(KEYS.cardSettings),
         dbLoad(KEYS.cardResumen),dbLoad(KEYS.catsGasto),dbLoad(KEYS.catsIngreso),
-        dbLoad(KEYS.people),dbLoad(KEYS.tercerosSeen),
+        dbLoad(KEYS.people),dbLoad(KEYS.tercerosSeen),dbLoad(KEYS.onboardingSeen),,
       ]);
       if(t) setTxns(t); if(p) setPaid(p); if(s) setSavings(s);
       if(r) setUsdRate(r); if(bg) setBudget(bg); if(cs) setCardSettings(cs);
       if(cr) setCardResumen(cr); if(cg) setCatsGasto(cg); if(ci) setCatsIngreso(ci);
-      if(pe) setPeople(pe); if(ts) setTercerosSeen(ts);
+      if(pe) setPeople(pe); if(ts) setTercerosSeen(ts); if(ob) setOnboardingSeen(ob);
       const baseAccs=a||DEFAULT_ACCOUNTS;
       const hasTarjeta=baseAccs.some(ac=>ac.id==="tarjeta");
       const finalAccs=hasTarjeta?baseAccs:[...baseAccs,{id:"tarjeta",name:"Tarjeta",emoji:"💳",color:"#E87ACE"}];
@@ -371,6 +373,7 @@ export default function App() {
   };
   // 🆕 CRUD personas (cuentas de terceros)
   const markTercerosSeen=async()=>{ setTercerosSeen(true); await dbSave(KEYS.tercerosSeen,true); await saveToFirestore({tercerosSeen:JSON.stringify(true)}); };
+  const finishOnboarding=async()=>{ setOnboardingSeen(true); setOnboardingStep(0); await dbSave(KEYS.onboardingSeen,true); await saveToFirestore({onboardingSeen:JSON.stringify(true)}); };
   const addPerson=async()=>{ if(!personForm.name) return; const pid="p"+Date.now().toString(); const pr={id:pid,name:personForm.name,emoji:personForm.emoji,color:personForm.color}; const u=[...people,pr]; setPeople(u); await dbSave(KEYS.people,u); await saveToFirestore({people:JSON.stringify(u)}); const sal=parseFloat(personForm.saldo); if(sal>0){ const signo=personForm.saldoTipo==="teDebe"?1:-1; const t={id:Date.now()+1,type:"transfer",fromId:signo>0?"_init":pid,toId:signo>0?pid:"_init",amount:sal,currency:"ARS",date:todayStr(),description:"Saldo inicial"}; const tu=[t,...txns]; setTxns(tu); await dbSave(KEYS.txns,tu); await saveToFirestore({txns:JSON.stringify(tu)}); } doFlash(); setPersonForm(emptyPerson); setEditingPerson(null); setModal("terceros"); };
   const delPerson=async id=>{ const u=people.filter(p=>p.id!==id); setPeople(u); await dbSave(KEYS.people,u); await saveToFirestore({people:JSON.stringify(u)}); if(terceroDetail===id) setTerceroDetail(null); };
   const startEditPerson=(pr)=>{ setEditingPerson(pr.id); setPersonForm({name:pr.name,emoji:pr.emoji,color:pr.color}); setModal("personForm"); };
@@ -740,6 +743,36 @@ export default function App() {
   );
 
   if(loading) return <div style={{...S.app(isMobile),display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}><span style={{color:C.gold}}>Cargando…</span></div>;
+  // 🆕 Nombre de pila para saludar (toma la primera palabra del nombre de Google)
+  const firstName=(user?.displayName||"").trim().split(" ")[0]||"";
+
+  // 🆕 ONBOARDING DE PRIMER USO — se muestra hasta que la persona lo completa
+  if(!onboardingSeen){
+    const steps=[
+      {emoji:"💰",title:`Bienvenida${firstName?`, ${firstName}`:""} 👋`,text:"Esta es tu app personal para llevar el control de tu plata: cuánto entra, cuánto sale y qué te falta pagar. Te muestro lo básico en 30 segundos."},
+      {emoji:"➕",title:"Cargá tus movimientos",text:"Con el botón + de abajo sumás ingresos y gastos. A cada uno le elegís una cuenta (sueldo, efectivo, tarjeta…) y una categoría. La app calcula sola tu balance real."},
+      {emoji:"📋",title:"No te olvides de pagar",text:"En la sección Pagos cargás tus gastos fijos y el resumen de la tarjeta. La app te avisa lo que vence pronto para que no se te pase ningún vencimiento."},
+      {emoji:"🔒",title:"Tus datos son privados",text:"Todo se guarda de forma segura en tu cuenta. Podés entrar desde cualquier celular o computadora y siempre vas a ver tu información."},
+    ];
+    const step=steps[onboardingStep];
+    const last=onboardingStep===steps.length-1;
+    return(
+      <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"Georgia,serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,maxWidth:430,margin:"0 auto"}}>
+        <div style={{textAlign:"center",maxWidth:360,width:"100%"}}>
+          <div style={{fontSize:64,marginBottom:22}}>{step.emoji}</div>
+          <div style={{fontSize:11,letterSpacing:4,color:C.gold,textTransform:"uppercase",marginBottom:14}}>Paso {onboardingStep+1} de {steps.length}</div>
+          <div style={{fontSize:25,color:C.text,marginBottom:14,lineHeight:1.3}}>{step.title}</div>
+          <div style={{fontSize:15,color:"#888",lineHeight:1.8,marginBottom:30}}>{step.text}</div>
+          <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:30}}>
+            {steps.map((_,i)=><div key={i} style={{width:i===onboardingStep?22:8,height:8,borderRadius:4,background:i===onboardingStep?C.gold:"rgba(200,169,126,0.25)",transition:"width 0.2s"}}/>)}
+          </div>
+          <button onClick={()=>last?finishOnboarding():setOnboardingStep(s=>s+1)} style={{width:"100%",padding:15,borderRadius:13,background:C.gold,border:"none",color:C.bg,fontSize:16,fontFamily:"Georgia,serif",cursor:"pointer",marginBottom:12}}>{last?"Empezar 🚀":"Siguiente →"}</button>
+          {!last&&<button onClick={finishOnboarding} style={{background:"none",border:"none",color:"#555",fontSize:13,cursor:"pointer",fontFamily:"Georgia,serif"}}>Saltar introducción</button>}
+          {onboardingStep>0&&<button onClick={()=>setOnboardingStep(s=>s-1)} style={{display:"block",margin:"18px auto 0",background:"none",border:"none",color:"#444",fontSize:13,cursor:"pointer",fontFamily:"Georgia,serif"}}>← Atrás</button>}
+        </div>
+      </div>
+    );
+  }
 
   // ══ MODALES ══
   const TxnModalBody=({onSave,saveLabel,isEdit=false})=>(
@@ -1219,7 +1252,7 @@ export default function App() {
       {!isMobile&&<Sidebar/>}
       <div style={isMobile?{}:S.content}>
       <div style={{...S.hdr,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div><div style={S.ey}>Mis finanzas · {MONTHS_FULL[CM]}</div><h1 style={S.h1}>Hola 👋</h1></div>
+        <div><div style={S.ey}>Mis finanzas · {MONTHS_FULL[CM]}</div><h1 style={S.h1}>Hola{firstName?`, ${firstName}`:""} 👋</h1></div>
       </div>
       <div style={S.gCard()}>
         <div style={S.ey}>Balance real disponible</div>
