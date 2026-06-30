@@ -125,6 +125,10 @@ export default function App() {
           if(d.catsIngreso)  setCatsIngreso(JSON.parse(d.catsIngreso));
           if(d.people)       setPeople(JSON.parse(d.people));
           if(d.onboardingSeen) setOnboardingSeen(JSON.parse(d.onboardingSeen));
+          if(d.firstUseDate) setFirstUseDate(JSON.parse(d.firstUseDate));
+          else { const fu=todayStr(); setFirstUseDate(fu); setDoc(ref,{firstUseDate:JSON.stringify(fu)},{merge:true}); }
+        } else {
+          const fu=todayStr(); setFirstUseDate(fu); setDoc(ref,{firstUseDate:JSON.stringify(fu)},{merge:true});
         }
       }
     });
@@ -650,7 +654,8 @@ export default function App() {
   const [tour,setTour]=useState(null);              // recorrido activo {tab, step}
   const [tourRect,setTourRect]=useState(null);      // posición del elemento resaltado
   const [celebs,setCelebs]=useState({});            // felicitaciones ya mostradas
-  const [celebration,setCelebration]=useState(null);// {title, text} en pantalla
+  const [celebration,setCelebration]=useState(null);// {title, text} en pantalla   
+  const [firstUseDate,setFirstUseDate]=useState(null);// 🆕 fecha del primer uso (botón repetir recorrido)
   const _tourPrevLen=useRef(null);
   const _tourArmed=useRef(false);
 
@@ -776,6 +781,10 @@ export default function App() {
   };
   // ════════════════════════════ fin del bloque pegado ════════════════════════════
 
+  // 🆕 BOTÓN "VOLVER A VER EL RECORRIDO" — visible solo la primera semana de uso
+  const daysSinceFirstUse=firstUseDate?Math.floor((new Date(todayStr()+"T12:00:00")-new Date(firstUseDate+"T12:00:00"))/86400000):0;
+  const showReplayTour=firstUseDate!==null&&daysSinceFirstUse<7;
+  const replayTour=()=>{ setToursSeen({}); dbSave("fv6-tours-seen",{}); saveToFirestore({toursSeen:JSON.stringify({})}); setAccountDetail(null); setModal(null); setTab("home"); };
   const dayBadge=(dueDay,done,m,y)=>{
     if(done) return <span style={{fontSize:10,color:C.green}}>✓ Pagado</span>;
     const d=daysUntil(dueDay,m,y); let color,bg,label;
@@ -1325,6 +1334,8 @@ export default function App() {
         [()=>{setTempBudget(String(budget));setModal("budget");},"rgba(90,232,154,0.07)","rgba(90,232,154,0.2)",C.green,`🎯 Presupuesto: ${budget>0?fmt(budget):"No configurado"}`],
         [()=>{setTerceroDetail(null);setModal("terceros");},"rgba(232,122,206,0.05)","rgba(232,122,206,0.2)",C.pink,`👥 Cuentas de terceros${people.length>0?` (${people.length})`:""}`],
       ].map(([fn,bg,border,col,label],i)=>(<div key={i} data-tour={i===0?"acc-config":undefined} style={{margin:"6px 14px"}}><button onClick={fn} style={{width:"100%",padding:12,borderRadius:12,background:bg,border:`1px solid ${border}`,color:col,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>{label}</button></div>))}
+      {/* 🆕 Volver a ver el recorrido — solo la primera semana de uso */}
+      {showReplayTour&&<div style={{margin:"6px 14px"}}><button onClick={replayTour} style={{width:"100%",padding:12,borderRadius:12,background:"rgba(200,169,126,0.07)",border:"1px solid rgba(200,169,126,0.25)",color:C.gold,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>🧭 Volver a ver el recorrido · {7-daysSinceFirstUse}d restantes</button></div>}
       {/* 🆕 GATILLO OCULTO DE REINICIO — tocá 7 veces "v6.0" para abrir la zona de peligro */}
       <div style={{textAlign:"center",padding:"30px 0 90px"}}>
         <span onClick={()=>{const n=resetTaps+1;setResetTaps(n);if(n>=7){setResetTaps(0);setModal("reset");}}} style={{fontSize:10,color:"#1B1B23",userSelect:"none",letterSpacing:3,cursor:"default"}}>v6.0</span>
