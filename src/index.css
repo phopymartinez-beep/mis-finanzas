@@ -40,3 +40,13 @@ html, body, #root {
     @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
   }
 }
+
+/* Tipografía solo para los números */
+@font-face {
+  font-family: 'AppNums';
+  src: local('Menlo'), local('Consolas'), local('SF Mono'),
+       local('Roboto Mono'), local('DejaVu Sans Mono'), local('Liberation Mono');
+  /* $ % + , - . dígitos y el signo menos "−" */
+  unicode-range: U+0024, U+0025, U+002B, U+002C, U+002D, U+002E, U+0030-0039, U+2212;
+}
+* { font-variant-numeric: tabular-nums; } /* todos los dígitos al mismo ancho → columnas alineadas */
