@@ -43,7 +43,7 @@ html, body, #root {
 
 @font-face {
   font-family: 'AppNums';
-  src: url('https://cdn.jsdelivr.net/npm/@fontsource/roboto-mono/files/roboto-mono-latin-400-normal.woff2') format('woff2');
+  src: url('https://cdn.jsdelivr.net/npm/@fontsource/inter/files/inter-latin-400-normal.woff2') format('woff2');
   unicode-range: U+0024, U+0025, U+002B, U+002C, U+002D, U+002E, U+0030-0039, U+2212;
   font-display: swap;
 }
