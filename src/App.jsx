@@ -155,6 +155,8 @@ export default function App() {
   const [editingAcc,setEditingAcc]=useState(null);
   const [editingCat,setEditingCat]=useState(null);
   const [resetTaps,setResetTaps]=useState(0); // 🆕 contador oculto para Reinicio
+  const [saving,setSaving]=useState(false);   // 🆕 feedback "Guardando…" + evita doble carga
+  const savingRef=useRef(false);              // 🆕 candado instantáneo contra el doble toque
 
   const emptyTxn={amount:"",category:"",description:"",date:todayStr(),accountId:"",currency:"ARS",frequency:"once",installments:"",installmentAmountType:"perInstallment",fromId:"",toId:""};
   const emptyPerson={name:"",emoji:"🧑",color:"#5A9BE8",saldo:"",saldoTipo:"teDebe"};
@@ -203,6 +205,7 @@ export default function App() {
   },[]);
 
   const doFlash=()=>{ setFlash(true); setTimeout(()=>setFlash(false),1200); };
+  const guardado=async(fn)=>{ if(savingRef.current) return; savingRef.current=true; setSaving(true); try{ await fn(); } finally{ savingRef.current=false; setSaving(false); } }; // 🆕 candado + "Guardando…" para todos los botones
   const isPaid=(id,m,y)=>paid.includes(paidKey(id,m,y));
   const toARS=t=>t.currency==="USD"?t.amount*usdRate:t.amount;
   const closeModal=()=>{
@@ -838,7 +841,7 @@ export default function App() {
         <div><label style={{...S.lbl,marginBottom:4}}>Total cuotas</label><input style={S.inp} type="number" min="1" placeholder="–" value={billForm.installments} onChange={e=>setBillForm(f=>({...f,installments:e.target.value}))}/></div>
       </div>
       {!billForm.isCard&&<><label style={S.lbl}>Cuenta</label><AccPills selected={billForm.accountId} onSelect={id=>setBillForm(f=>({...f,accountId:id}))}/></>}
-      <button style={{...S.sub(),marginTop:8}} onClick={onSave}>{flash?"✅ Guardado":saveLabel}</button>
+      <button disabled={saving} style={{...S.sub(),marginTop:8,opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(onSave)}>{saving?"Guardando…":(flash?"✅ Guardado":saveLabel)}</button>
     </>
   );
 
@@ -850,7 +853,7 @@ export default function App() {
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:14}}>{EMOJIS_ACC.map(e=><button key={e} onClick={()=>setAccForm(f=>({...f,emoji:e}))} style={{width:40,height:40,borderRadius:10,border:`1px solid ${accForm.emoji===e?C.gold:"rgba(255,255,255,0.08)"}`,background:accForm.emoji===e?"rgba(200,169,126,0.15)":"rgba(255,255,255,0.03)",fontSize:22,cursor:"pointer"}}>{e}</button>)}</div>
       <label style={S.lbl}>Color</label>
       <div style={{display:"flex",gap:10,marginBottom:24,flexWrap:"wrap"}}>{ACC_COLORS.map(c=><button key={c} onClick={()=>setAccForm(f=>({...f,color:c}))} style={{width:32,height:32,borderRadius:"50%",background:c,border:accForm.color===c?"3px solid white":"3px solid transparent",cursor:"pointer"}}/>)}</div>
-      <button style={S.sub()} onClick={onSave}>{flash?"✅ Guardado":saveLabel}</button>
+      <button disabled={saving} style={{...S.sub(),opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(onSave)}>{saving?"Guardando…":(flash?"✅ Guardado":saveLabel)}</button>
     </>
   );
 
@@ -986,7 +989,7 @@ export default function App() {
         ? <input style={{...S.inp,marginBottom:20}} type="number" min="1" max="31" placeholder="ej: 15" value={txnForm.date} onChange={e=>setTxnForm(f=>({...f,date:e.target.value}))}/>
         : <input style={{...S.inp,marginBottom:20}} type="date" value={txnForm.date||todayStr()} onChange={e=>setTxnForm(f=>({...f,date:e.target.value}))}/>
       }
-      <button style={S.sub()} onClick={()=>(!isEdit&&addType==="transfer")?addTransfer():onSave()}>{flash?"✅ Guardado":saveLabel}</button>
+      <button disabled={saving} style={{...S.sub(),opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={async()=>{ if(savingRef.current) return; savingRef.current=true; setSaving(true); try{ await ((!isEdit&&addType==="transfer")?addTransfer():onSave()); } finally{ savingRef.current=false; setSaving(false); } }}>{saving?"Guardando…":(flash?"✅ Guardado":saveLabel)}</button>
     </div>
   );
 
@@ -1003,7 +1006,7 @@ export default function App() {
       <label style={S.lbl}>¿Para qué?</label><input style={{...S.inp,marginBottom:14}} type="text" placeholder="ej: Cámara…" value={savForm.name} onChange={e=>setSavForm(f=>({...f,name:e.target.value}))}/>
       <label style={S.lbl}>Objetivo ($)</label><input style={{...S.inp,marginBottom:14}} type="number" value={savForm.goal} onChange={e=>setSavForm(f=>({...f,goal:e.target.value}))}/>
       <label style={S.lbl}>Ya ahorrado ($)</label><input style={{...S.inp,marginBottom:24}} type="number" placeholder="$ 0" value={savForm.saved} onChange={e=>setSavForm(f=>({...f,saved:e.target.value}))}/>
-      <button style={S.sub()} onClick={addSaving}>{flash?"✅ Guardado":"Crear meta"}</button>
+      <button disabled={saving} style={{...S.sub(),opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(addSaving)}>{saving?"Guardando…":(flash?"✅ Guardado":"Crear meta")}</button>
     </div></div>
   );
 
@@ -1047,7 +1050,7 @@ export default function App() {
       <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:14}}>{EMOJIS_CAT.map(e=><button key={e} onClick={()=>setCatForm(f=>({...f,emoji:e}))} style={{width:40,height:40,borderRadius:9,border:`1px solid ${catForm.emoji===e?C.gold:"rgba(255,255,255,0.08)"}`,background:catForm.emoji===e?"rgba(200,169,126,0.15)":"rgba(255,255,255,0.03)",fontSize:22,cursor:"pointer"}}>{e}</button>)}</div>
       <label style={S.lbl}>Color</label>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:24}}>{CAT_COLORS.map(c=><button key={c} onClick={()=>setCatForm(f=>({...f,color:c}))} style={{width:30,height:30,borderRadius:"50%",background:c,border:catForm.color===c?"3px solid white":"3px solid transparent",cursor:"pointer"}}/>)}</div>
-      <button style={S.sub()} onClick={()=>modal==="editCat"?saveCatEdit():addCat(modal==="addCat_gasto"?"gasto":"ingreso")}>{flash?"✅ Guardado":"Guardar"}</button>
+      <button disabled={saving} style={{...S.sub(),opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(()=>modal==="editCat"?saveCatEdit():addCat(modal==="addCat_gasto"?"gasto":"ingreso"))}>{saving?"Guardando…":(flash?"✅ Guardado":"Guardar")}</button>
     </div></div>
   );
 
@@ -1057,7 +1060,7 @@ export default function App() {
       <label style={S.lbl}>1 US$ = $ pesos</label>
       <input style={{...S.inp,fontSize:26,textAlign:"center",marginBottom:8}} type="number" placeholder={String(usdRate)} value={tempRate} onChange={e=>setTempRate(e.target.value)}/>
       <div style={{fontSize:12,color:"#555",textAlign:"center",marginBottom:24}}>Actual: ${usdRate.toLocaleString("es-AR")}</div>
-      <button style={S.sub(C.blue)} onClick={saveRate}>{flash?"✅ Guardado":"Guardar"}</button>
+      <button disabled={saving} style={{...S.sub(C.blue),opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(saveRate)}>{saving?"Guardando…":(flash?"✅ Guardado":"Guardar")}</button>
     </div></div>
   );
 
@@ -1067,7 +1070,7 @@ export default function App() {
       <label style={S.lbl}>¿Cuánto querés gastar por mes?</label>
       <input style={{...S.inp,fontSize:26,textAlign:"center",marginBottom:8}} type="number" placeholder={budget>0?String(budget):"$ 0"} value={tempBudget} onChange={e=>setTempBudget(e.target.value)}/>
       <div style={{fontSize:12,color:"#555",textAlign:"center",marginBottom:24}}>{budget>0?`Configurado: ${fmt(budget)}`:"Sin presupuesto"}</div>
-      <button style={S.sub(C.green)} onClick={saveBudget}>{flash?"✅ Guardado":"Guardar"}</button>
+      <button disabled={saving} style={{...S.sub(C.green),opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(saveBudget)}>{saving?"Guardando…":(flash?"✅ Guardado":"Guardar")}</button>
     </div></div>
   );
 
@@ -1079,7 +1082,7 @@ export default function App() {
       <input style={{...S.inp,marginBottom:16}} type="number" min="1" max="31" placeholder={String(cardSettings.closingDay)} value={tempCard.closingDay} onChange={e=>setTempCard(f=>({...f,closingDay:e.target.value}))}/>
       <label style={S.lbl}>Día de vencimiento (mes siguiente)</label>
       <input style={{...S.inp,marginBottom:24}} type="number" min="1" max="31" placeholder={String(cardSettings.dueDay)} value={tempCard.dueDay} onChange={e=>setTempCard(f=>({...f,dueDay:e.target.value}))}/>
-      <button style={S.sub(C.pink)} onClick={saveCardSettings_}>{flash?"✅ Guardado":"Guardar"}</button>
+      <button disabled={saving} style={{...S.sub(C.pink),opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(saveCardSettings_)}>{saving?"Guardando…":(flash?"✅ Guardado":"Guardar")}</button>
       <div style={{height:14}}/>
       <div style={{fontSize:12,color:"#888",lineHeight:1.7,marginBottom:10}}>Si cambiás el cierre de forma permanente, podés reacomodar las cuotas que todavía no pagaste al ciclo que les corresponde. Las cuotas ya pagadas o de resúmenes cerrados <strong style={{color:"#aaa"}}>no se tocan</strong>.</div>
       <button style={{width:"100%",padding:14,borderRadius:13,background:"rgba(124,158,254,0.1)",border:"1px solid rgba(124,158,254,0.3)",color:"#7C9EFE",fontSize:14,cursor:"pointer",fontFamily:"AppNums, Georgia, serif"}} onClick={recalcInstallments}>{flash?"✅ Cuotas recalculadas":"🔄 Recalcular cuotas con el cierre actual"}</button>
@@ -1099,7 +1102,7 @@ export default function App() {
       </div>
       <label style={S.lbl}>¿Con qué cuenta pagás?</label>
       <AccPills selected={resumenPayAcc} onSelect={setResumenPayAcc} showNone={true} exclude={["tarjeta"]}/>
-      <button disabled={!resumenPayAcc} style={{...S.sub(resumenPayAcc?C.pink:"#333"),color:resumenPayAcc?C.bg:"#555"}} onClick={()=>payCardResumen(resumenPayAcc,resumenPayTarget.key,resumenPayTarget.amount,resumenPayTarget.m)}>{flash?"✅ Pagado":"Confirmar pago"}</button>
+      <button disabled={!resumenPayAcc||saving} style={{...S.sub(resumenPayAcc?C.pink:"#333"),color:resumenPayAcc?C.bg:"#555",opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(()=>payCardResumen(resumenPayAcc,resumenPayTarget.key,resumenPayTarget.amount,resumenPayTarget.m))}>{saving?"Guardando…":(flash?"✅ Pagado":"Confirmar pago")}</button>
     </div></div>
   );
 
@@ -1159,7 +1162,7 @@ export default function App() {
         </div>
         <input style={{...S.inp,marginBottom:24}} type="number" placeholder="$ 0 (dejá vacío si arranca en cero)" value={personForm.saldo} onChange={e=>setPersonForm(f=>({...f,saldo:e.target.value}))}/>
       </>}
-      <button style={S.sub()} onClick={()=>editingPerson?savePersonEdit():addPerson()}>{flash?"✅ Guardado":editingPerson?"Guardar cambios":"Crear persona"}</button>
+      <button disabled={saving} style={{...S.sub(),opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(()=>editingPerson?savePersonEdit():addPerson())}>{saving?"Guardando…":(flash?"✅ Guardado":editingPerson?"Guardar cambios":"Crear persona")}</button>
     </div></div>
   );
 
