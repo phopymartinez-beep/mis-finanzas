@@ -1247,7 +1247,28 @@ export default function App() {
         </div>
         {isTarjeta&&(<div style={S.pinkC}><div style={{fontSize:11,color:C.pink,letterSpacing:2,textTransform:"uppercase",marginBottom:6}}>Resumen {MONTHS_FULL[PM]}</div><div style={{fontSize:22,color:C.pink,fontFamily:"AppNums, Georgia"}}>{prevResumenPaid?<span style={{color:C.green}}>✓ Pagado</span>:fmt(prevResumenAmount)}</div>{!prevResumenPaid&&<div style={{fontSize:11,color:"#7A4060",marginTop:4}}>Vence el {cardSettings.dueDay} de {MONTHS_FULL[CM]}</div>}<div style={{fontSize:11,color:"#666",marginTop:8}}>Acumulando {MONTHS_FULL[CM]}: {fmt(currAccumulating)}</div></div>)}
         <div style={S.sec}>Historial de movimientos</div>
-        {(()=>{const movs=entityMovements(accountDetail);return movs.length===0?<div style={{textAlign:"center",padding:"30px",color:"#444",fontSize:13}}>Sin movimientos registrados.</div>
+        {(()=>{
+          if(isTarjeta){
+            const rows=[];
+            entityMovements(accountDetail).forEach(({t,dir,label})=>rows.push({kind:"txn",t,dir,label,sortT:new Date(t.date+"T12:00:00").getTime()}));
+            for(let i=0;i<18;i++){
+              const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
+              const m=d.getMonth(), y=d.getFullYear();
+              const sortT=new Date(`${y}-${String(m+1).padStart(2,"0")}-${String(Math.min(28,cardSettings.closingDay)).padStart(2,"0")}T12:00:00`).getTime();
+              const carry=carryInto(m,y);
+              if(carry>0) rows.push({kind:"carry",m,y,amount:carry,sortT,key:`carry-${m}-${y}`});
+              cardRowsForResumen(m,y).forEach(({bill:b,n},idx)=>rows.push({kind:"cuota",bill:b,n,m,y,sortT,key:`c-${b.id}-${n}-${m}-${y}-${idx}`}));
+            }
+            rows.sort((a,b)=>b.sortT-a.sortT);
+            return rows.length===0?<div style={{textAlign:"center",padding:"30px",color:"#444",fontSize:13}}>Sin movimientos registrados.</div>
+            :<div style={{padding:"0 20px",marginBottom:80}}>{rows.map(r=>{
+              if(r.kind==="cuota") return(<div key={r.key} style={S.txRow}><div style={S.eBox("rgba(232,122,206,0.15)")}>{r.bill.emoji}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}>{r.bill.name}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>Resumen {MONTHS_ES[r.m]}{r.n!==null?` · C${r.n}/${r.bill.installments}`:""}</div></div><div style={{fontSize:15,fontFamily:"AppNums, Georgia",color:C.pink,flexShrink:0}}>−{fmt(r.bill.amount)}</div><button onClick={()=>startEditBill(r.bill)} style={S.penBtn}>✏️</button><button onClick={()=>r.n===null?openDelMonthly(r.bill,r.m,r.y):openDelCuota(r.bill,r.n,r.m,r.y)} style={S.xBtn}>×</button></div>);
+              if(r.kind==="carry") return(<div key={r.key} style={S.txRow}><div style={S.eBox("rgba(232,164,90,0.15)")}>↪️</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14,color:"#E8A45A"}}>Saldo arrastrado a {MONTHS_ES[r.m]}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>Impago del resumen anterior</div></div><div style={{fontSize:15,fontFamily:"AppNums, Georgia",color:"#E8A45A",flexShrink:0}}>−{fmt(r.amount)}</div></div>);
+              const t=r.t;const isT=t.type==="transfer";const cat=isT?{emoji:r.dir>0?"↘":"↗",color:r.dir>0?C.green:C.red}:(t.type==="gasto"?catsGasto:catsIngreso).find(c=>c.name===t.category)||{emoji:"•",color:"#888"};
+              return(<div key={"tx-"+t.id} style={S.txRow}><div style={S.eBox(`${cat.color}18`)}>{cat.emoji}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}>{r.label}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>{isT?"Transferencia":t.category} · {fmtDate(t.date)}{t.currency==="USD"&&<span style={{color:C.blue}}> · 🇺🇸</span>}</div></div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:15,fontFamily:"AppNums, Georgia",color:r.dir>0?C.green:C.red}}>{r.dir>0?"+":"−"}{t.currency==="USD"?fmtUSD(t.amount):fmt(t.amount)}</div>{t.currency==="USD"&&<div style={{fontSize:10,color:"#444"}}>≈{fmt(t.amount*usdRate)}</div>}</div>{!isT&&<button onClick={()=>startEditTxn(t)} style={S.penBtn}>✏️</button>}<button onClick={()=>delTxn(t.id)} style={S.xBtn}>×</button></div>);
+            })}</div>;
+          }
+          const movs=entityMovements(accountDetail);return movs.length===0?<div style={{textAlign:"center",padding:"30px",color:"#444",fontSize:13}}>Sin movimientos registrados.</div>
           :<div style={{padding:"0 20px",marginBottom:80}}>{movs.map(({t,dir,label})=>{const isT=t.type==="transfer";const cat=isT?{emoji:dir>0?"↘":"↗",color:dir>0?C.green:C.red}:(t.type==="gasto"?catsGasto:catsIngreso).find(c=>c.name===t.category)||{emoji:"•",color:"#888"};return(<div key={t.id} style={S.txRow}><div style={S.eBox(`${cat.color}18`)}>{cat.emoji}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}>{label}</div><div style={{fontSize:11,color:"#555",marginTop:1}}>{isT?"Transferencia":t.category} · {fmtDate(t.date)}{t.currency==="USD"&&<span style={{color:C.blue}}> · 🇺🇸</span>}</div></div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:15,fontFamily:"AppNums, Georgia",color:dir>0?C.green:C.red}}>{dir>0?"+":"−"}{t.currency==="USD"?fmtUSD(t.amount):fmt(t.amount)}</div>{t.currency==="USD"&&<div style={{fontSize:10,color:"#444"}}>≈{fmt(t.amount*usdRate)}</div>}</div>{!isT&&<button onClick={()=>startEditTxn(t)} style={S.penBtn}>✏️</button>}<button onClick={()=>delTxn(t.id)} style={S.xBtn}>×</button></div>);})}
           </div>;})()}
         <div style={S.nav(isMobile)}>{NAV.map(([t,e,l])=><button key={t} style={S.nBtn(tab===t)} onClick={()=>{setAccountDetail(null);setTab(t);}}><span>{e}</span>{l}</button>)}</div>
