@@ -1468,7 +1468,7 @@ export default function App() {
   );
 
   // ══ HOME TAB ══
-  const recentTxns=[...txns].sort((a,b)=>new Date(b.date+"T12:00:00")-new Date(a.date+"T12:00:00")).slice(0,12);
+  const recentTxns=[...txns].filter(t=>t.accountId!=="tarjeta").sort((a,b)=>new Date(b.date+"T12:00:00")-new Date(a.date+"T12:00:00")).slice(0,12);
   return(
     <div style={S.app(isMobile)}>
       {!isMobile&&<Sidebar/>}
