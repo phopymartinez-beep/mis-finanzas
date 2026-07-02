@@ -886,6 +886,7 @@ export default function App() {
       </nav>
       <div style={{padding:"16px 20px"}}>
         <button onClick={()=>setModal("txn")} style={{width:"100%",padding:"12px",borderRadius:10,background:"rgba(200,169,126,0.15)",border:"1px solid rgba(200,169,126,0.3)",color:C.gold,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia, serif",marginBottom:8}}>+ Nuevo movimiento</button>
+        <button onClick={()=>setModal("settings")} style={{width:"100%",padding:"10px",borderRadius:10,background:"transparent",border:"1px solid rgba(255,255,255,0.1)",color:"#888",fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia, serif",marginBottom:8}}>⚙️ Configuración</button>
         <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0"}}>
           <img src={user?.photoURL} width={24} height={24} style={{borderRadius:"50%"}} alt=""/>
           <span style={{fontSize:11,color:"#555",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user?.displayName}</span>
@@ -1006,6 +1007,25 @@ export default function App() {
     </div></div>
   );
 
+  if(modal==="settings") return(
+    <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
+      <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div><div style={S.ey}>Configuración</div><div style={{fontSize:18}}>Ajustes de la app</div></div></div>
+      {[
+        [()=>{setTempCard({closingDay:String(cardSettings.closingDay),dueDay:String(cardSettings.dueDay)});setModal("cardSettings");},"rgba(232,122,206,0.07)","rgba(232,122,206,0.25)",C.pink,`💳 Tarjeta: cierre día ${cardSettings.closingDay}, vence día ${cardSettings.dueDay}`],
+        [()=>setModal("cats"),"rgba(160,124,254,0.07)","rgba(160,124,254,0.25)",C.purple,"🏷️ Configurar categorías"],
+        [()=>{setTempRate(String(usdRate));setModal("usd");},"rgba(90,155,232,0.07)","rgba(90,155,232,0.2)",C.blue,`🇺🇸 TC dólar: $${usdRate.toLocaleString("es-AR")}/US$`],
+        [()=>{setTempBudget(String(budget));setModal("budget");},"rgba(90,232,154,0.07)","rgba(90,232,154,0.2)",C.green,`🎯 Presupuesto: ${budget>0?fmt(budget):"No configurado"}`],
+        [()=>{setTerceroDetail(null);setModal("terceros");},"rgba(232,122,206,0.05)","rgba(232,122,206,0.2)",C.pink,`👥 Cuentas de terceros${people.length>0?` (${people.length})`:""}`],
+      ].map(([fn,bg,border,col,label],i)=>(<button key={i} onClick={fn} style={{width:"100%",padding:13,borderRadius:12,background:bg,border:`1px solid ${border}`,color:col,fontSize:14,cursor:"pointer",fontFamily:"AppNums, Georgia",marginBottom:10,textAlign:"left"}}>{label}</button>))}
+      {showReplayTour&&<button onClick={replayTour} style={{width:"100%",padding:13,borderRadius:12,background:"rgba(200,169,126,0.07)",border:"1px solid rgba(200,169,126,0.25)",color:C.gold,fontSize:14,cursor:"pointer",fontFamily:"AppNums, Georgia",marginBottom:10,textAlign:"left"}}>🧭 Volver a ver el recorrido · {7-daysSinceFirstUse}d restantes</button>}
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 4px 4px",marginTop:6,borderTop:"1px solid rgba(255,255,255,0.06)"}}>
+        {user?.photoURL&&<img src={user.photoURL} width={28} height={28} style={{borderRadius:"50%"}} alt=""/>}
+        <span style={{fontSize:12,color:"#888",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user?.displayName}</span>
+        <button onClick={handleLogout} style={{background:"none",border:"1px solid rgba(255,255,255,0.12)",borderRadius:9,padding:"7px 14px",color:"#888",fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>Salir</button>
+      </div>
+    </div></div>
+  );
+  
   if(modal==="cats") return(
     <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
       <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div><div style={S.ey}>Configurar categorías</div><div style={{fontSize:18}}>Mis categorías</div></div></div>
@@ -1340,16 +1360,7 @@ export default function App() {
         </div>
       );})}
       {savings.length===0&&<div style={{textAlign:"center",padding:"10px 20px",color:"#444",fontSize:13}}>Sin metas todavía.</div>}
-      {[
-        [()=>setModal("saving"),"rgba(200,169,126,0.07)","rgba(200,169,126,0.2)",C.gold,"+ Nueva meta de ahorro"],
-        [()=>{setTempCard({closingDay:String(cardSettings.closingDay),dueDay:String(cardSettings.dueDay)});setModal("cardSettings");},"rgba(232,122,206,0.07)","rgba(232,122,206,0.25)",C.pink,`💳 Tarjeta: cierre día ${cardSettings.closingDay}, vence día ${cardSettings.dueDay}`],
-        [()=>setModal("cats"),"rgba(160,124,254,0.07)","rgba(160,124,254,0.25)",C.purple,"🏷️ Configurar categorías"],
-        [()=>{setTempRate(String(usdRate));setModal("usd");},"rgba(90,155,232,0.07)","rgba(90,155,232,0.2)",C.blue,`🇺🇸 TC dólar: $${usdRate.toLocaleString("es-AR")}/US$`],
-        [()=>{setTempBudget(String(budget));setModal("budget");},"rgba(90,232,154,0.07)","rgba(90,232,154,0.2)",C.green,`🎯 Presupuesto: ${budget>0?fmt(budget):"No configurado"}`],
-        [()=>{setTerceroDetail(null);setModal("terceros");},"rgba(232,122,206,0.05)","rgba(232,122,206,0.2)",C.pink,`👥 Cuentas de terceros${people.length>0?` (${people.length})`:""}`],
-      ].map(([fn,bg,border,col,label],i)=>(<div key={i} data-tour={i===0?"acc-config":undefined} style={{margin:"6px 14px"}}><button onClick={fn} style={{width:"100%",padding:12,borderRadius:12,background:bg,border:`1px solid ${border}`,color:col,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>{label}</button></div>))}
-      {/* 🆕 Volver a ver el recorrido — solo la primera semana de uso */}
-      {showReplayTour&&<div style={{margin:"6px 14px"}}><button onClick={replayTour} style={{width:"100%",padding:12,borderRadius:12,background:"rgba(200,169,126,0.07)",border:"1px solid rgba(200,169,126,0.25)",color:C.gold,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>🧭 Volver a ver el recorrido · {7-daysSinceFirstUse}d restantes</button></div>}
+      <div style={{margin:"6px 14px"}}><button onClick={()=>setModal("saving")} style={{width:"100%",padding:12,borderRadius:12,background:"rgba(200,169,126,0.07)",border:"1px solid rgba(200,169,126,0.2)",color:C.gold,fontSize:13,cursor:"pointer",fontFamily:"AppNums, Georgia"}}>+ Nueva meta de ahorro</button></div>
       {/* 🆕 GATILLO OCULTO DE REINICIO — tocá 7 veces "v6.0" para abrir la zona de peligro */}
       <div style={{textAlign:"center",padding:"30px 0 90px"}}>
         <span onClick={()=>{const n=resetTaps+1;setResetTaps(n);if(n>=7){setResetTaps(0);setModal("reset");}}} style={{fontSize:10,color:"#1B1B23",userSelect:"none",letterSpacing:3,cursor:"default"}}>v6.0</span>
@@ -1412,6 +1423,7 @@ export default function App() {
         {renderTour()}{renderCelebration()}
       <div style={{...S.hdr,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div><div style={S.ey}>Mis finanzas · {MONTHS_FULL[CM]}</div><h1 style={S.h1}>Hola{firstName?`, ${firstName}`:""} 👋</h1></div>
+        <button onClick={()=>setModal("settings")} title="Configuración" style={{width:42,height:42,borderRadius:12,background:"rgba(200,169,126,0.08)",border:"1px solid rgba(200,169,126,0.2)",color:C.gold,fontSize:20,cursor:"pointer",flexShrink:0}}>⚙️</button>
       </div>
       <div style={S.gCard()}>
         <div style={S.ey}>Balance real disponible</div>
