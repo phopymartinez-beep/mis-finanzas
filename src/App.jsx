@@ -185,16 +185,16 @@ export default function App() {
 
   useEffect(()=>{
     (async()=>{
-      const [t,b,p,a,s,r,bg,cs,cr,cg,ci,pe,ts,ob]=await Promise.all([
+      const [t,b,p,a,s,r,bg,cs,cr,cg,ci,pe,ts,ob,rp]=await Promise.all([
         dbLoad(KEYS.txns),dbLoad(KEYS.bills),dbLoad(KEYS.paid),dbLoad(KEYS.accounts),
         dbLoad(KEYS.savings),dbLoad(KEYS.usdRate),dbLoad(KEYS.budget),dbLoad(KEYS.cardSettings),
         dbLoad(KEYS.cardResumen),dbLoad(KEYS.catsGasto),dbLoad(KEYS.catsIngreso),
-        dbLoad(KEYS.people),dbLoad(KEYS.tercerosSeen),dbLoad(KEYS.onboardingSeen),,
+        dbLoad(KEYS.people),dbLoad(KEYS.tercerosSeen),dbLoad(KEYS.onboardingSeen),dbLoad(KEYS.resumenPending),
       ]);
       if(t) setTxns(t); if(p) setPaid(p); if(s) setSavings(s);
       if(r) setUsdRate(r); if(bg) setBudget(bg); if(cs) setCardSettings(cs);
       if(cr) setCardResumen(cr); if(cg) setCatsGasto(cg); if(ci) setCatsIngreso(ci);
-      if(pe) setPeople(pe); if(ts) setTercerosSeen(ts); if(ob) setOnboardingSeen(ob);
+      if(pe) setPeople(pe); if(ts) setTercerosSeen(ts); if(ob) setOnboardingSeen(ob); if(rp) setResumenPending(rp);
       const baseAccs=a||DEFAULT_ACCOUNTS;
       const hasTarjeta=baseAccs.some(ac=>ac.id==="tarjeta");
       const finalAccs=hasTarjeta?baseAccs:[...baseAccs,{id:"tarjeta",name:"Tarjeta",emoji:"💳",color:"#E87ACE"}];
@@ -449,6 +449,7 @@ export default function App() {
     // ✅ FIX sincroniza paid y cardResumen si cambiaron
     if(newPaid.length!==paid.length){ setPaid(newPaid); await dbSave(KEYS.paid,newPaid); await saveToFirestore({paid:JSON.stringify(newPaid)}); }
     if(newResumen.length!==cardResumen.length){ setCardResumen(newResumen); await dbSave(KEYS.cardResumen,newResumen); await saveToFirestore({cardResumen:JSON.stringify(newResumen)}); }
+    if(txn._cardResumenKey&&resumenPending[txn._cardResumenKey]!==undefined){ const np={...resumenPending}; delete np[txn._cardResumenKey]; setResumenPending(np); await dbSave(KEYS.resumenPending,np); await saveToFirestore({resumenPending:JSON.stringify(np)}); }
   };
 
   const startEditTxn=(txn)=>{ setEditingTxn(txn.id); setTxnForm({amount:String(txn.amount),category:txn.category||"",description:txn.description||"",date:txn.date,accountId:txn.accountId||"",currency:txn.currency||"ARS",frequency:"once",installments:"",installmentAmountType:"perInstallment"}); setAddType(txn.type); setModal("editTxn"); };
@@ -624,19 +625,19 @@ export default function App() {
   // 🆕 REINICIO TOTAL — borra todos los datos de prueba y vuelve todo a cero.
   // Mantiene la configuración (tipo de cambio y fechas de tarjeta).
   const resetAll=async()=>{
-    setTxns([]); setBills([]); setPaid([]); setCardResumen([]); setSavings([]);
+    setTxns([]); setBills([]); setPaid([]); setCardResumen([]); setSavings([]); setResumenPending({});
     setAccounts(DEFAULT_ACCOUNTS); setBudget(0); setPeople([]);
     setCatsGasto(DEFAULT_CATS_GASTO); setCatsIngreso(DEFAULT_CATS_INGRESO);
     setAccountDetail(null); setTerceroDetail(null); setTab("home");
     await Promise.all([
       dbSave(KEYS.txns,[]), dbSave(KEYS.bills,[]), dbSave(KEYS.paid,[]),
-      dbSave(KEYS.cardResumen,[]), dbSave(KEYS.savings,[]), dbSave(KEYS.people,[]),
+      dbSave(KEYS.cardResumen,[]), dbSave(KEYS.savings,[]), dbSave(KEYS.people,[]), dbSave(KEYS.resumenPending,{}),
       dbSave(KEYS.accounts,DEFAULT_ACCOUNTS), dbSave(KEYS.budget,0),
       dbSave(KEYS.catsGasto,DEFAULT_CATS_GASTO), dbSave(KEYS.catsIngreso,DEFAULT_CATS_INGRESO),
     ]);
     await saveToFirestore({
       txns:JSON.stringify([]), bills:JSON.stringify([]), paid:JSON.stringify([]),
-      cardResumen:JSON.stringify([]), savings:JSON.stringify([]), people:JSON.stringify([]),
+      cardResumen:JSON.stringify([]), savings:JSON.stringify([]), people:JSON.stringify([]), resumenPending:JSON.stringify({}),
       accounts:JSON.stringify(DEFAULT_ACCOUNTS), budget:JSON.stringify(0),
       catsGasto:JSON.stringify(DEFAULT_CATS_GASTO), catsIngreso:JSON.stringify(DEFAULT_CATS_INGRESO),
     });
@@ -1291,13 +1292,14 @@ export default function App() {
           <div style={{background:rPaid?"rgba(90,232,154,0.04)":"rgba(232,122,206,0.06)",border:`1px solid ${rPaid?"rgba(90,232,154,0.2)":"rgba(232,122,206,0.25)"}`,borderRadius:16,overflow:"hidden"}}>
             <div style={{...S.row,padding:"14px 16px",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
               {/* ✅ FIX al desmarcar resumen también llama saveToFirestore */}
-              <button style={S.chk(rPaid)} onClick={()=>{ if(!rPaid){setResumenPayAcc("");setResumenPayTarget({key:rKey,amount:rAmount,m:viewCurr?PM:CM,y:viewCurr?PY:CY});setModal("payResumenModal");}else{const u=cardResumen.filter(k=>k!==rKey);setCardResumen(u);dbSave(KEYS.cardResumen,u);saveToFirestore({cardResumen:JSON.stringify(u)});} }}>{rPaid?"✓":""}</button>
+              <button style={S.chk(rPaid)} onClick={()=>{ if(!rPaid){setResumenPayAcc("");setResumenPayAmt(String(Math.round(rAmount)));setResumenPayKeep(true);setResumenPayTarget({key:rKey,amount:rAmount,m:viewCurr?PM:CM,y:viewCurr?PY:CY});setModal("payResumenModal");}else{const u=cardResumen.filter(k=>k!==rKey);setCardResumen(u);dbSave(KEYS.cardResumen,u);saveToFirestore({cardResumen:JSON.stringify(u)});const np={...resumenPending};if(np[rKey]!==undefined){delete np[rKey];setResumenPending(np);dbSave(KEYS.resumenPending,np);saveToFirestore({resumenPending:JSON.stringify(np)});}} }}>{rPaid?"✓":""}</button>
               <div style={S.eBox("rgba(232,122,206,0.15)")}>💳</div>
               <div style={{flex:1}}><div style={{fontSize:15,color:rPaid?"#888":"#EDE9E3",textDecoration:rPaid?"line-through":"none"}}>Resumen Tarjeta {rMonthLabel}</div><div style={{fontSize:11,color:C.pink,marginTop:3}}>{rPaid?"✓ Pagado":`Vence el ${rDueDay} de ${MONTHS_FULL[viewM]} · ${rDaysLeft<0?`Venció hace ${Math.abs(rDaysLeft)}d`:rDaysLeft===0?"¡HOY!":rDaysLeft===1?"Mañana":`${rDaysLeft}d`}`}</div></div>
               <div style={{fontSize:18,fontFamily:"AppNums, Georgia",color:rPaid?C.green:C.pink,flexShrink:0}}>{fmt(rAmount)}</div>
             </div>
             <div style={{padding:"12px 16px"}}>
               <div style={{fontSize:9,color:C.pink,letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>Detalle</div>
+              {carryInto(viewCurr?PM:CM,viewCurr?PY:CY)>0&&<div style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}><span style={{fontSize:15}}>↪️</span><span style={{flex:1,fontSize:13,color:"#E8A45A"}}>Saldo del resumen anterior</span><span style={{fontSize:13,fontFamily:"AppNums, Georgia",color:"#E8A45A"}}>{fmt(carryInto(viewCurr?PM:CM,viewCurr?PY:CY))}</span></div>}
               {cardRowsForResumen(viewCurr?PM:CM,viewCurr?PY:CY).map(({bill:b,n,e},i)=>{const mov=e&&!entryLocked(e);return(<div key={`${b.id}-${n}-${i}`} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}><span style={{fontSize:15}}>{b.emoji}</span><span style={{flex:1,fontSize:13,color:"#C0B0F0"}}>{b.name}</span>{n!==null&&<span style={{fontSize:10,color:"#666",marginRight:6}}>C{n}/{b.installments}</span>}{mov&&<><button title="Mover al resumen anterior" onClick={()=>moveCuota(b.id,n,-1)} style={{...S.penBtn,marginRight:0,color:"#7C9EFE"}}>◀</button><button title="Mover al resumen siguiente" onClick={()=>moveCuota(b.id,n,1)} style={{...S.penBtn,marginRight:4,color:"#7C9EFE"}}>▶</button></>}<button onClick={()=>startEditBill(b)} style={{...S.penBtn,marginRight:4}}>✏️</button><button onClick={()=>n===null?openDelMonthly(b,viewCurr?PM:CM,viewCurr?PY:CY):openDelCuota(b,n,viewCurr?PM:CM,viewCurr?PY:CY)} style={{...S.xBtn,marginRight:6}}>×</button><span style={{fontSize:13,fontFamily:"AppNums, Georgia",color:"#C0B0F0"}}>{fmt(b.amount)}</span></div>);})}
               {/* 🆕 compras sueltas con tarjeta que entran a este resumen (editables/borrables) */}
               {cardTxnsForResumen(viewCurr?PM:CM,viewCurr?PY:CY).map(t=>{const cat=catsGasto.find(c=>c.name===t.category)||{emoji:"🛒",color:"#C0B0F0"};return(<div key={t.id} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}><span style={{fontSize:15}}>{cat.emoji}</span><span style={{flex:1,fontSize:13,color:"#C0B0F0"}}>{t.description||t.category}</span><button onClick={()=>startEditTxn(t)} style={{...S.penBtn,marginRight:4}}>✏️</button><button onClick={()=>delTxn(t.id)} style={{...S.xBtn,marginRight:6}}>×</button><span style={{fontSize:13,fontFamily:"AppNums, Georgia",color:"#C0B0F0"}}>{fmt(toARS(t))}</span></div>);})}
