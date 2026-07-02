@@ -51,7 +51,7 @@ const KEYS = {
   txns:"fv6-txns", bills:"fv6-bills", paid:"fv6-paid",
   accounts:"fv6-accounts", savings:"fv6-savings",
   usdRate:"fv6-usdrate", budget:"fv6-budget",
-  cardSettings:"fv6-card", cardResumen:"fv6-resumen",
+  cardSettings:"fv6-card", cardResumen:"fv6-resumen", resumenPending:"fv6-resumen-pending",
   catsGasto:"fv6-cats-gasto", catsIngreso:"fv6-cats-ingreso",
   people:"fv6-people", tercerosSeen:"fv6-terceros-seen", onboardingSeen:"fv6-onboarding-seen",
 };
@@ -82,6 +82,7 @@ export default function App() {
   const [bills,setBills]=useState([]);
   const [paid,setPaid]=useState([]);
   const [cardResumen,setCardResumen]=useState([]);
+  const [resumenPending,setResumenPending]=useState({});
   const [accounts,setAccounts]=useState(DEFAULT_ACCOUNTS);
   const [savings,setSavings]=useState([]);
   const [catsGasto,setCatsGasto]=useState(DEFAULT_CATS_GASTO);
@@ -118,6 +119,7 @@ export default function App() {
           if(d.accounts)     setAccounts(JSON.parse(d.accounts));
           if(d.savings)      setSavings(JSON.parse(d.savings));
           if(d.cardResumen)  setCardResumen(JSON.parse(d.cardResumen));
+          if(d.resumenPending) setResumenPending(JSON.parse(d.resumenPending));
           if(d.usdRate)      setUsdRate(JSON.parse(d.usdRate));
           if(d.budget)       setBudget(JSON.parse(d.budget));
           if(d.cardSettings) setCardSettings(JSON.parse(d.cardSettings));
@@ -149,6 +151,8 @@ export default function App() {
   const [flash,setFlash]=useState(false);
   const [payWith,setPayWith]=useState({billId:null,accountId:""});
   const [resumenPayAcc,setResumenPayAcc]=useState("");
+  const [resumenPayAmt,setResumenPayAmt]=useState("");
+  const [resumenPayKeep,setResumenPayKeep]=useState(true);
   const [resumenPayTarget,setResumenPayTarget]=useState(null); // 🆕 qué resumen se está pagando (mes en curso o adelantado)
   const [editingTxn,setEditingTxn]=useState(null);
   const [editingBill,setEditingBill]=useState(null);
@@ -211,7 +215,7 @@ export default function App() {
   const closeModal=()=>{
     setModal(null); setEditingTxn(null); setEditingBill(null); setEditingAcc(null); setEditingCat(null);
     setTxnForm(emptyTxn); setBillForm(emptyBill); setAccForm(emptyAcc); setSavForm(emptySav); setCatForm(emptyCat);
-    setPayWith({billId:null,accountId:""}); setResumenPayAcc(""); setResumenPayTarget(null);
+    setPayWith({billId:null,accountId:""}); setResumenPayAcc(""); setResumenPayAmt(""); setResumenPayKeep(true); setResumenPayTarget(null);
     setTempRate(""); setTempBudget(""); setTempCard({closingDay:"",dueDay:""});
     setAddSavId(null); setAddSavAmt(""); setDelTarget(null);
     setPersonForm(emptyPerson); setEditingPerson(null);
@@ -299,14 +303,15 @@ export default function App() {
     return r.m===m&&r.y===y;
   };
   const cardTxnsForResumen=(m,y)=>txns.filter(t=>txnInResumen(t,m,y));
+  const prevResumenOf=(m,y)=>{ let pm=m-1,py=y; if(pm<0){pm=11;py--;} return {m:pm,y:py}; };
+  const carryInto=(m,y)=>{ const p=prevResumenOf(m,y); return resumenPending[resumenKey(p.m,p.y)]||0; };
+  const resumenTotal=(m,y)=>cardFixedTotalForResumen(m,y)+cardTxnsForResumen(m,y).reduce((s,t)=>s+toARS(t),0)+carryInto(m,y);
 
   const activeCardBillsThisMonth=bills.filter(b=>isCardBillActiveInMonth(b,CM,CY));
   const activeCardBillsPrevMonth=bills.filter(b=>isCardBillActiveInMonth(b,PM,PY));
   // ✅ totales por cierre, contando cuotas dobles si las hubiera
-  const prevResumenAmount=cardFixedTotalForResumen(PM,PY)
-    +cardTxnsForResumen(PM,PY).reduce((s,t)=>s+toARS(t),0);
-  const currAccumulating=cardFixedTotalForResumen(CM,CY)
-    +cardTxnsForResumen(CM,CY).reduce((s,t)=>s+toARS(t),0);
+  const prevResumenAmount=resumenTotal(PM,PY);
+  const currAccumulating=resumenTotal(CM,CY);
 
   const prevResumenKey_=resumenKey(PM,PY);
   const prevResumenPaid=cardResumen.includes(prevResumenKey_);
@@ -550,14 +555,23 @@ export default function App() {
   };
 
   // ── Pay card resumen ───────────────────────────────────────────────────────
-  const payCardResumen=async(fromAccountId,rKey,rAmount,labelM)=>{
-    const u=[...cardResumen,rKey]; setCardResumen(u); await dbSave(KEYS.cardResumen,u);
-    await saveToFirestore({cardResumen:JSON.stringify(u)}); // ✅ FIX sincroniza cardResumen
-    if(fromAccountId&&fromAccountId!=="none"){
-      const txn={id:Date.now(),type:"gasto",amount:rAmount,category:"Finanzas",description:`Resumen Tarjeta ${MONTHS_FULL[labelM!==undefined?labelM:PM]}`,date:todayStr(),accountId:fromAccountId,currency:"ARS",_cardResumenKey:rKey};
+  const payCardResumen=async(fromAccountId,rKey,rTotal,labelM,paidAmount,keepPending)=>{
+    const pay=(paidAmount===undefined||paidAmount===null||paidAmount==="")?rTotal:(parseFloat(paidAmount)||0);
+    // marca el resumen como saldado (total, parcial o de más)
+    const u=cardResumen.includes(rKey)?cardResumen:[...cardResumen,rKey];
+    setCardResumen(u); await dbSave(KEYS.cardResumen,u); await saveToFirestore({cardResumen:JSON.stringify(u)});
+    // remanente: solo si pagaste de menos Y marcaste que queda pendiente
+    const remainder=(pay<rTotal&&keepPending)?Math.round(rTotal-pay):0;
+    const np={...resumenPending};
+    if(remainder>0) np[rKey]=remainder; else delete np[rKey];
+    setResumenPending(np); await dbSave(KEYS.resumenPending,np); await saveToFirestore({resumenPending:JSON.stringify(np)});
+    // movimiento real: sale lo que efectivamente pagaste (si pagaste de más, el excedente queda como intereses/cargos en Finanzas)
+    if(fromAccountId&&fromAccountId!=="none"&&pay>0){
+      const desc=pay>rTotal?`Resumen Tarjeta ${MONTHS_FULL[labelM!==undefined?labelM:PM]} (incluye intereses/cargos)`:`Resumen Tarjeta ${MONTHS_FULL[labelM!==undefined?labelM:PM]}`;
+      const txn={id:Date.now(),type:"gasto",amount:pay,category:"Finanzas",description:desc,date:todayStr(),accountId:fromAccountId,currency:"ARS",_cardResumenKey:rKey};
       const tu=[txn,...txns]; setTxns(tu); await dbSave(KEYS.txns,tu); await saveToFirestore({txns:JSON.stringify(tu)});
     }
-    doFlash(); setResumenPayAcc(""); setModal(null);
+    doFlash(); setResumenPayAcc(""); setResumenPayAmt(""); setResumenPayKeep(true); setModal(null);
   };
 
   // ── CRUD: Accounts ─────────────────────────────────────────────────────────
@@ -1097,12 +1111,28 @@ export default function App() {
         <div style={{fontSize:34,fontFamily:"AppNums, Georgia",color:C.pink,marginBottom:4}}>{fmt(resumenPayTarget.amount)}</div>
       </div>
       <div style={{...S.card(),marginBottom:14,maxHeight:150,overflowY:"auto"}}>
+        {carryInto(resumenPayTarget.m,resumenPayTarget.y)>0&&<div style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>↪️</span><span style={{flex:1,fontSize:13,color:"#E8A45A"}}>Saldo anterior</span><span style={{fontSize:13,fontFamily:"AppNums, Georgia",color:"#E8A45A"}}>{fmt(carryInto(resumenPayTarget.m,resumenPayTarget.y))}</span></div>}
         {cardRowsForResumen(resumenPayTarget.m,resumenPayTarget.y).map(({bill:b,n},i)=><div key={`${b.id}-${n}-${i}`} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>{b.emoji}</span><span style={{flex:1,fontSize:13}}>{b.name}{n!==null&&<span style={{fontSize:10,color:"#888",marginLeft:6}}>C{n}/{b.installments}</span>}</span><span style={{fontSize:13,fontFamily:"AppNums, Georgia",color:C.pink}}>{fmt(b.amount)}</span></div>)}
         {cardTxnsForResumen(resumenPayTarget.m,resumenPayTarget.y).map(t=><div key={t.id} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>🛒</span><span style={{flex:1,fontSize:13}}>{t.description||t.category}</span><span style={{fontSize:13,fontFamily:"AppNums, Georgia",color:C.pink}}>{fmt(toARS(t))}</span></div>)}
       </div>
+      <label style={S.lbl}>¿Cuánto pagaste?</label>
+      <input style={{...S.inp,fontSize:22,textAlign:"center",marginBottom:8}} type="number" placeholder={String(Math.round(resumenPayTarget.amount))} value={resumenPayAmt} onChange={e=>setResumenPayAmt(e.target.value)}/>
+      {(parseFloat(resumenPayAmt||resumenPayTarget.amount)||0)<resumenPayTarget.amount&&(
+        <div style={{background:"rgba(232,164,90,0.08)",border:"1px solid rgba(232,164,90,0.25)",borderRadius:12,padding:"12px 14px",marginBottom:14}}>
+          <div style={{fontSize:14,color:"#E8A45A",marginBottom:12,lineHeight:1.6}}>¿La diferencia la anotamos como pendiente para el próximo mes?</div>
+          <div style={{display:"flex",gap:8,marginBottom:8}}>
+            <button style={{...S.tBtn(resumenPayKeep,"#E8A45A"),flex:1}} onClick={()=>setResumenPayKeep(true)}>{resumenPayKeep?"☑":"☐"} Sí</button>
+            <button style={{...S.tBtn(!resumenPayKeep,C.green),flex:1}} onClick={()=>setResumenPayKeep(false)}>{!resumenPayKeep?"☑":"☐"} No</button>
+          </div>
+          <div style={{fontSize:11,color:"#888",lineHeight:1.6}}>{resumenPayKeep?`Se anotan ${fmt(Math.round(resumenPayTarget.amount-(parseFloat(resumenPayAmt||resumenPayTarget.amount)||0)))} como pendiente para el próximo resumen.`:"La diferencia fue un ajuste o devolución del banco. No se anota nada."}</div>
+        </div>
+      )}
+      {(parseFloat(resumenPayAmt||resumenPayTarget.amount)||0)>resumenPayTarget.amount&&(
+        <div style={{background:"rgba(90,155,232,0.08)",border:"1px solid rgba(90,155,232,0.25)",borderRadius:12,padding:"12px 14px",marginBottom:14,fontSize:12,color:C.blue,lineHeight:1.6}}>Pagaste de más: la diferencia de {fmt(Math.round((parseFloat(resumenPayAmt||resumenPayTarget.amount)||0)-resumenPayTarget.amount))} se registra como intereses/cargos en Finanzas.</div>
+      )}
       <label style={S.lbl}>¿Con qué cuenta pagás?</label>
       <AccPills selected={resumenPayAcc} onSelect={setResumenPayAcc} showNone={true} exclude={["tarjeta"]}/>
-      <button disabled={!resumenPayAcc||saving} style={{...S.sub(resumenPayAcc?C.pink:"#333"),color:resumenPayAcc?C.bg:"#555",opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(()=>payCardResumen(resumenPayAcc,resumenPayTarget.key,resumenPayTarget.amount,resumenPayTarget.m))}>{saving?"Guardando…":(flash?"✅ Pagado":"Confirmar pago")}</button>
+      <button disabled={!resumenPayAcc||saving} style={{...S.sub(resumenPayAcc?C.pink:"#333"),color:resumenPayAcc?C.bg:"#555",opacity:saving?0.55:1,cursor:saving?"default":"pointer"}} onClick={()=>guardado(()=>payCardResumen(resumenPayAcc,resumenPayTarget.key,resumenPayTarget.amount,resumenPayTarget.m,resumenPayAmt,resumenPayKeep))}>{saving?"Guardando…":(flash?"✅ Pagado":"Confirmar pago")}</button>
     </div></div>
   );
 
