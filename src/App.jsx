@@ -1106,20 +1106,16 @@ export default function App() {
 
   if(modal==="payResumenModal"&&resumenPayTarget) return(
     <div style={S.modal(isMobile)}><div style={isMobile?{padding:"28px 20px"}:{background:"#0D0D12",borderRadius:16,maxWidth:520,width:"100%",padding:"28px 28px",boxShadow:"0 20px 60px rgba(0,0,0,0.5)",margin:"40px auto"}}>
-      <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div><div style={S.ey}>Pagar resumen</div><div style={{fontSize:18}}>Tarjeta {MONTHS_FULL[resumenPayTarget.m]}</div></div></div>
+      <div style={{...S.row,marginBottom:22}}><button onClick={closeModal} style={S.back}>←</button><div><div style={S.ey}>Pagar resumen</div><div style={{fontSize:18}}>Resumen de {MONTHS_FULL[resumenPayTarget.m]}</div><div style={{fontSize:11,color:"#888",marginTop:2}}>Vence el {cardSettings.dueDay} de {MONTHS_FULL[resumenPayTarget.m===11?0:resumenPayTarget.m+1]}</div></div></div>
       <div style={{background:"rgba(232,122,206,0.08)",border:"1px solid rgba(232,122,206,0.25)",borderRadius:16,padding:20,marginBottom:14,textAlign:"center"}}>
         <div style={{fontSize:11,color:C.pink,letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>Total a pagar</div>
         <div style={{fontSize:34,fontFamily:"AppNums, Georgia",color:C.pink,marginBottom:4}}>{fmt(resumenPayTarget.amount)}</div>
       </div>
-      <div style={{...S.card(),marginBottom:14,maxHeight:150,overflowY:"auto"}}>
-        {carryInto(resumenPayTarget.m,resumenPayTarget.y)>0&&<div style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>↪️</span><span style={{flex:1,fontSize:13,color:"#E8A45A"}}>Saldo anterior</span><span style={{fontSize:13,fontFamily:"AppNums, Georgia",color:"#E8A45A"}}>{fmt(carryInto(resumenPayTarget.m,resumenPayTarget.y))}</span></div>}
-        {cardRowsForResumen(resumenPayTarget.m,resumenPayTarget.y).map(({bill:b,n},i)=><div key={`${b.id}-${n}-${i}`} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>{b.emoji}</span><span style={{flex:1,fontSize:13}}>{b.name}{n!==null&&<span style={{fontSize:10,color:"#888",marginLeft:6}}>C{n}/{b.installments}</span>}</span><span style={{fontSize:13,fontFamily:"AppNums, Georgia",color:C.pink}}>{fmt(b.amount)}</span></div>)}
-        {cardTxnsForResumen(resumenPayTarget.m,resumenPayTarget.y).map(t=><div key={t.id} style={{...S.row,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}><span style={{fontSize:16}}>🛒</span><span style={{flex:1,fontSize:13}}>{t.description||t.category}</span><span style={{fontSize:13,fontFamily:"AppNums, Georgia",color:C.pink}}>{fmt(toARS(t))}</span></div>)}
-      </div>
+     {carryInto(resumenPayTarget.m,resumenPayTarget.y)>0&&<div style={{...S.row,padding:"10px 14px",marginBottom:14,background:"rgba(232,164,90,0.07)",border:"1px solid rgba(232,164,90,0.2)",borderRadius:12}}><span style={{fontSize:15}}>↪️</span><span style={{flex:1,fontSize:12,color:"#E8A45A"}}>Incluye saldo del resumen anterior</span><span style={{fontSize:13,fontFamily:"AppNums, Georgia",color:"#E8A45A"}}>{fmt(carryInto(resumenPayTarget.m,resumenPayTarget.y))}</span></div>}
       <div style={{background:"rgba(200,169,126,0.06)",border:"1px solid rgba(200,169,126,0.18)",borderRadius:12,padding:"11px 14px",marginBottom:12,fontSize:12,color:"#B8AE9E",lineHeight:1.7}}>💡 Pagá el monto real que hiciste en tu banco:<br/>• <strong style={{color:C.text}}>Igual al total</strong>: resumen saldado.<br/>• <strong style={{color:"#E8A45A"}}>Menos</strong>: podés arrastrar la diferencia al próximo resumen, o marcar que quedó saldado si el banco te hizo una devolución (ej: intereses de pagos en dólares).<br/>• <strong style={{color:C.blue}}>Más</strong>: el excedente se anota como intereses/cargos en Finanzas.</div>
       <label style={S.lbl}>¿Cuánto pagaste?</label>
-      <input style={{...S.inp,fontSize:22,textAlign:"center",marginBottom:8}} type="number" placeholder={String(Math.round(resumenPayTarget.amount))} value={resumenPayAmt} onChange={e=>setResumenPayAmt(e.target.value)}/>
-      {(parseFloat(resumenPayAmt||resumenPayTarget.amount)||0)<resumenPayTarget.amount&&(
+      <input style={{...S.inp,fontSize:22,textAlign:"center",marginBottom:8}} type="text" inputMode="numeric" placeholder={fmt(Math.round(resumenPayTarget.amount))} value={resumenPayAmt?Number(resumenPayAmt).toLocaleString("es-AR"):""} onChange={e=>{const raw=e.target.value.replace(/\D/g,"");setResumenPayAmt(raw);}}/>
+      {resumenPayTarget.amount-(parseFloat(resumenPayAmt||resumenPayTarget.amount)||0)>=1&&(
         <div style={{background:"rgba(232,164,90,0.08)",border:"1px solid rgba(232,164,90,0.25)",borderRadius:12,padding:"12px 14px",marginBottom:14}}>
           <div style={{fontSize:14,color:"#E8A45A",marginBottom:12,lineHeight:1.6}}>¿La diferencia la anotamos como pendiente para el próximo mes?</div>
           <div style={{display:"flex",gap:8,marginBottom:8}}>
@@ -1129,7 +1125,7 @@ export default function App() {
           <div style={{fontSize:11,color:"#888",lineHeight:1.6}}>{resumenPayKeep?`Se anotan ${fmt(Math.round(resumenPayTarget.amount-(parseFloat(resumenPayAmt||resumenPayTarget.amount)||0)))} como pendiente para el próximo resumen.`:"La diferencia fue un ajuste o devolución del banco. No se anota nada."}</div>
         </div>
       )}
-      {(parseFloat(resumenPayAmt||resumenPayTarget.amount)||0)>resumenPayTarget.amount&&(
+      {(parseFloat(resumenPayAmt||resumenPayTarget.amount)||0)-resumenPayTarget.amount>=1&&(
         <div style={{background:"rgba(90,155,232,0.08)",border:"1px solid rgba(90,155,232,0.25)",borderRadius:12,padding:"12px 14px",marginBottom:14,fontSize:12,color:C.blue,lineHeight:1.6}}>Pagaste de más: la diferencia de {fmt(Math.round((parseFloat(resumenPayAmt||resumenPayTarget.amount)||0)-resumenPayTarget.amount))} se registra como intereses/cargos en Finanzas.</div>
       )}
       <label style={S.lbl}>¿Con qué cuenta pagás?</label>
